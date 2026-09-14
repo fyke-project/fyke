@@ -1,0 +1,82 @@
+package dev.fyke.starter
+
+import dev.fyke.core.model.FykeRecordSummary
+import dev.fyke.core.model.OutboxEvent
+import dev.fyke.core.model.OutboxRecord
+import dev.fyke.core.poller.PollerEngine
+import dev.fyke.core.store.OutboxStore
+import dev.fyke.core.store.OutboxWriter
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import java.time.Instant
+import java.util.UUID
+
+class FykeFacadeTest {
+
+	private val writer = mockk<OutboxWriter>()
+	private val poller = mockk<PollerEngine>()
+	private val store = mockk<OutboxStore>()
+
+	@BeforeEach
+	fun setUp() {
+		Fyke.initialize(writer, poller, store)
+	}
+
+	@Test
+	fun `Fyke send should delegate to OutboxWriter`() {
+		val event = OutboxEvent(type = "OrderCreated", destination = "orders", businessKey = "ord-1", payload = "{}")
+		val expectedRecord = OutboxRecord(
+			id = UUID.randomUUID(),
+			type = "OrderCreated",
+			destination = "orders",
+			businessKey = "ord-1",
+			idempotencyKey = "idem-1",
+			payload = "{}".toByteArray(),
+			payloadHash = "hash"
+		)
+
+		every { writer.write(event) } returns expectedRecord
+
+		val result = Fyke.send(event)
+
+		assertThat(result).isEqualTo(expectedRecord)
+		verify(exactly = 1) { writer.write(event) }
+	}
+
+	@Test
+	fun `Fyke replay should delegate to PollerEngine`() {
+		val id = UUID.randomUUID()
+		every { poller.replay(id) } returns true
+
+		val success = Fyke.replay(id)
+
+		assertThat(success).isTrue()
+		verify(exactly = 1) { poller.replay(id) }
+	}
+
+	@Test
+	fun `Fyke searchByBusinessKey should delegate to OutboxStore`() {
+		val summaries = listOf(
+			FykeRecordSummary(
+				id = UUID.randomUUID(),
+				source = "OUTBOX",
+				type = "OrderCreated",
+				businessKey = "ord-1",
+				status = "PUBLISHED",
+				destination = "orders",
+				target = null,
+				timestamp = Instant.now()
+			)
+		)
+		every { store.searchByBusinessKey("ord-1") } returns summaries
+
+		val results = Fyke.searchByBusinessKey("ord-1")
+
+		assertThat(results).isEqualTo(summaries)
+		verify(exactly = 1) { store.searchByBusinessKey("ord-1") }
+	}
+}
