@@ -1,0 +1,71 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_size = 4
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Kotlin files (explicit preference: tabs for indentation)
+[*.{kt,kts}]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+continuation_indent_size = 4
+max_line_length = 120
+ij_kotlin_use_tab_character = true
+ij_kotlin_indent_size = 4
+ij_kotlin_tab_size = 4
+ij_kotlin_continuation_indent_size = 4
+ij_kotlin_align_multiline_parameters = false
+ij_kotlin_align_multiline_parameters_in_calls = false
+ij_kotlin_allow_trailing_comma = true
+ij_kotlin_allow_trailing_comma_on_call_site = true
+ij_kotlin_imports_layout = *
+ij_kotlin_name_count_to_use_star_import = 2147483647
+ij_kotlin_name_count_to_use_star_import_on_attributes = 2147483647
+
+# YAML (YAML standard disallows tabs)
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# XML / Liquibase changelogs
+[*.xml]
+indent_style = space
+indent_size = 4
+
+# SQL scripts
+[*.sql]
+indent_style = space
+indent_size = 4
+
+# JSON files
+[*.json]
+indent_style = space
+indent_size = 2
+
+# Properties files
+[*.properties]
+indent_style = space
+indent_size = 4
+
+# Markdown (preserve trailing spaces for line breaks)
+[*.md]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false
+
+# Shell scripts
+[*.sh]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+
+# Windows batch files
+[*.{bat,cmd}]
+indent_style = space
+indent_size = 4
+end_of_line = crlf
