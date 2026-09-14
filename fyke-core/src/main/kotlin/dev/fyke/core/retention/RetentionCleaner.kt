@@ -1,0 +1,82 @@
+package dev.fyke.core.retention
+
+import dev.fyke.core.store.OutboxStore
+import org.slf4j.LoggerFactory
+import java.time.Duration
+import java.time.Instant
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Background retention and housekeeping worker (R10, D-015).
+ *
+ * Purges expired PUBLISHED outbox rows and replayed DLQ rows in bounded batches to avoid table bloat.
+ */
+class RetentionCleaner(
+	private val outboxStore: OutboxStore,
+	private val outboxTtl: Duration = Duration.ofDays(7),
+	private val dlqTtl: Duration = Duration.ofDays(30),
+	private val purgeInterval: Duration = Duration.ofHours(1),
+	private val batchSize: Int = 1000
+) {
+	private val log = LoggerFactory.getLogger(javaClass)
+	private val running = AtomicBoolean(false)
+	private var scheduler: ScheduledExecutorService? = null
+
+	fun start() {
+		if (!running.compareAndSet(false, true)) return
+
+		val s = Executors.newSingleThreadScheduledExecutor { r ->
+			Thread(r, "fyke-retention-cleaner").apply { isDaemon = true }
+		}
+		scheduler = s
+		s.scheduleWithFixedDelay({
+			if (running.get()) {
+				clean()
+			}
+		}, purgeInterval.toMillis(), purgeInterval.toMillis(), TimeUnit.MILLISECONDS)
+
+		log.info("Fyke: Retention cleaner started (outboxTtl={}, dlqTtl={}, purgeInterval={}, batchSize={})",
+			outboxTtl, dlqTtl, purgeInterval, batchSize)
+	}
+
+	fun stop() {
+		if (running.compareAndSet(true, false)) {
+			scheduler?.shutdownNow()
+			scheduler = null
+			log.info("Fyke: Retention cleaner stopped")
+		}
+	}
+
+	fun clean(): CleanResult {
+		var totalOutboxPurged = 0
+		var totalDlqPurged = 0
+
+		try {
+			val outboxCutoff = Instant.now().minus(outboxTtl)
+			do {
+				val purged = outboxStore.purgePublished(outboxCutoff, batchSize)
+				totalOutboxPurged += purged
+			} while (purged == batchSize && running.get())
+
+			val dlqCutoff = Instant.now().minus(dlqTtl)
+			do {
+				val purged = outboxStore.purgeDlq(dlqCutoff, batchSize)
+				totalDlqPurged += purged
+			} while (purged == batchSize && running.get())
+
+			if (totalOutboxPurged > 0 || totalDlqPurged > 0) {
+				log.info("Fyke: Retention cleanup completed: {} published outbox rows purged, {} DLQ rows purged",
+					totalOutboxPurged, totalDlqPurged)
+			}
+		} catch (e: Exception) {
+			log.warn("Fyke: Error during retention cleanup run: {}", e.message)
+		}
+
+		return CleanResult(totalOutboxPurged, totalDlqPurged)
+	}
+
+	data class CleanResult(val outboxPurged: Int, val dlqPurged: Int)
+}
