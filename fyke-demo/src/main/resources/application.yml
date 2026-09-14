@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: fyke-demo
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fyke
+    username: fyke
+    password: fyke
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 50ms
+
+fyke:
+  enabled: true
+  poller:
+    enabled: true
+    poll-interval: 500ms
+    batch-size: 50
+  retention:
+    enabled: true
+    outbox-ttl: 7d
+    dlq-ttl: 30d
