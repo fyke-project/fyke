@@ -33,34 +33,34 @@ allprojects {
 		}
 		format("yaml") {
 			target("**/*.yml", "**/*.yaml")
-			targetExclude("**/build/**")
+			targetExclude("**/build/**", "**/.idea/**")
 			leadingTabsToSpaces(2)
 			trimTrailingWhitespace()
 			endWithNewline()
 		}
 		format("xml") {
 			target("**/*.xml")
-			targetExclude("**/build/**")
+			targetExclude("**/build/**", "**/.idea/**")
 			leadingTabsToSpaces(4)
 			trimTrailingWhitespace()
 			endWithNewline()
 		}
 		format("sql") {
 			target("**/*.sql")
-			targetExclude("**/build/**")
+			targetExclude("**/build/**", "**/.idea/**")
 			leadingTabsToSpaces(4)
 			trimTrailingWhitespace()
 			endWithNewline()
 		}
 		format("markdown") {
 			target("**/*.md")
-			targetExclude("**/build/**")
+			targetExclude("**/build/**", "**/.idea/**")
 			leadingTabsToSpaces(2)
 			endWithNewline()
 		}
 		format("misc") {
 			target("**/.gitignore", "**/.editorconfig", "**/*.properties")
-			targetExclude("**/build/**")
+			targetExclude("**/build/**", "**/.idea/**")
 			trimTrailingWhitespace()
 			endWithNewline()
 		}
