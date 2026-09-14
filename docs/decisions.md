@@ -91,3 +91,43 @@ Short form: **context → decision → consequences**. The long rationale (inter
 **Decision.** **Fyke.** Domain `fyke.dev`, Maven group `dev.fyke`.
 
 **Consequences.** Distinctive, short, memorable, zero trademark collision (Hookdeck's webhook-sending product is "Outpost" — we explicitly are not). The name *is* the product metaphor: events guided in, never escaping — which is the README's founding story.
+
+## D-012 — Partitioning via PartitionResolver & Postgres Advisory Locks
+
+**Context.** In multi-pod deployments, concurrent pollers claiming rows with `SKIP LOCKED` can publish events out of order across pods. Users need ordering guarantees (either global FIFO or per-business-key/tenant FIFO).
+
+**Decision.** Introduce `PartitionResolver` SPI (`SinglePartitionResolver` for global FIFO; `BusinessKeyPartitionResolver` for per-key FIFO). Poller workers claim partition rights using Postgres transaction-scoped advisory locks: `SELECT pg_try_advisory_xact_lock(hashtext(:partitionKey))`.
+
+**Consequences.** Guarantees strict per-partition FIFO ordering across arbitrary Kubernetes replicas with zero race conditions. Locks are automatically released when the transaction ends or if the pod crashes.
+
+## D-013 — Generic Destination and Headers for Multi-Binder Support
+
+**Context.** Columns like `exchange` or `routing_key` tie the database schema and DLQ directly to RabbitMQ, complicating future Kafka, SQS, or Webhook binders.
+
+**Decision.** Adopt generic `destination TEXT`, `target TEXT NULL`, and `headers JSONB NULL` across both `fyke_outbox` and `fyke_dlq`. RabbitMQ maps `destination` to exchange, `target` to routing key, and `headers` to message properties.
+
+**Consequences.** Any binder can publish or replay outbox and DLQ events without database schema changes.
+
+## D-014 — Universal Binary Storage (`BYTEA`) + Serializer SPI
+
+**Context.** Hardcoding `JSONB` for event payloads prevents applications from publishing Protobuf, Avro, or raw binary payloads, and incurs unnecessary deserialization overhead in the dispatch poller.
+
+**Decision.** Payloads are stored as `BYTEA` with `content_type VARCHAR(100)` (default `application/json`). A `FykePayloadSerializer` SPI handles serialization on write. The dispatch poller passes raw bytes directly to the broker without JVM deserialization.
+
+**Consequences.** Any payload format is supported. The poller achieves zero JVM deserialization overhead on dispatch.
+
+## D-015 — Configurable Retention and Purge Policy
+
+**Context.** An outbox table with high event throughput will experience rapid row churn, dead tuple accumulation, and disk bloat unless published rows are cleaned up.
+
+**Decision.** Add a background `RetentionCleaner` worker with configurable properties (`fyke.retention.outbox-ttl`, `fyke.retention.dlq-ttl`, `fyke.retention.batch-size`). It purges `PUBLISHED` rows and replayed DLQ rows in chunks.
+
+**Consequences.** Prevents PostgreSQL disk exhaustion and index bloat automatically without requiring manual DBA scripts.
+
+## D-016 — Dedicated LISTEN Connection & Graceful Non-Postgres / H2 Fallback
+
+**Context.** Postgres `LISTEN` blocks a physical socket waiting for notifications. Using the application's HikariCP pool for `LISTEN` can starve the app. Furthermore, developers often use in-memory H2 for local test profiles, which lacks `LISTEN/NOTIFY` and advisory locks.
+
+**Decision.** Manage a dedicated physical Postgres connection outside HikariCP for `PgNotifyChannel` with an auto-reconnect loop. For non-Postgres databases (H2, MySQL), auto-configuration logs an informative notice and gracefully degrades to `TimerChannel` interval polling and in-JVM partition locking.
+
+**Consequences.** Production gets zero-latency push and multi-pod advisory locks, while developer test suites on H2 continue to pass without throwing errors.

@@ -84,42 +84,51 @@ One **agent-initiated gRPC bidirectional stream**, three flows:
 
 ```
 fyke_outbox (
-  id              UUID PK,
-  seq             BIGINT,            -- append order, claim ordering
-  type            TEXT,              -- event type / routing key
-  business_key    TEXT,              -- user-facing key (order_X, device_id…)
-  idempotency_key TEXT,              -- dedup
-  status          TEXT,              -- NEW | DISPATCHING | PUBLISHED | CONSUMED | DEAD
-  payload         JSONB,             -- raw event
-  payload_hash    TEXT,              -- integrity + dedup proof
-  consumer        TEXT NULL,
-  correlation_id  TEXT NULL,
-  trace_id        TEXT NULL,
-  size            INT,
-  created_at      TIMESTAMPTZ,
-  updated_at      TIMESTAMPTZ,
-  published_at    TIMESTAMPTZ NULL,
-  consumed_at     TIMESTAMPTZ NULL,
-  attempts        INT DEFAULT 0,
-  next_attempt_at TIMESTAMPTZ NULL,
+  id               UUID PK,
+  seq              BIGSERIAL,         -- append order, claim ordering
+  partition_key    TEXT DEFAULT 'default', -- partitioning for order guarantees
+  type             TEXT,              -- event type (e.g. OrderCreated)
+  destination      TEXT,              -- target destination (exchange / topic / webhook url)
+  target           TEXT NULL,         -- target routing key / partition key / subject
+  business_key     TEXT,              -- user-facing key (order_X, device_id…)
+  idempotency_key  TEXT UNIQUE,       -- dedup key
+  status           TEXT,              -- NEW | DISPATCHING | PUBLISHED | DEAD
+  content_type     TEXT DEFAULT 'application/json',
+  payload          BYTEA,             -- raw event bytes (JSON, Protobuf, Avro, binary)
+  payload_hash     TEXT,              -- integrity + dedup proof
+  headers          JSONB NULL,        -- broker headers, content-type, tracing context
+  correlation_id   TEXT NULL,
+  trace_id         TEXT NULL,
+  size             INT,
+  created_at       TIMESTAMPTZ,
+  updated_at       TIMESTAMPTZ,
+  published_at     TIMESTAMPTZ NULL,
+  attempts         INT DEFAULT 0,
+  next_attempt_at  TIMESTAMPTZ NULL,
   lease_expires_at TIMESTAMPTZ NULL
 )
--- indexes: (business_key, status), (type, status, created_at),
---          (status, next_attempt_at) for the claim query, (lease_expires_at) for re-claim
+-- indexes: (status, partition_key, next_attempt_at, seq) WHERE status IN ('NEW', 'DISPATCHING')
+--          (business_key, status)
+--          (status, published_at) WHERE status = 'PUBLISHED' for retention purge
 
 fyke_dlq (
   id            UUID PK,
   source        TEXT,                -- OUTBOX | CONSUMER
   outbox_id     UUID NULL,           -- link back if publish-side
+  partition_key TEXT DEFAULT 'default',
   type          TEXT,
+  destination   TEXT,                -- destination exchange / topic / queue
+  target        TEXT NULL,           -- routing key / partition key
   business_key  TEXT,
-  payload       JSONB,
-  reason        TEXT,                -- failure / last error
+  content_type  TEXT DEFAULT 'application/json',
+  payload       BYTEA,
+  headers       JSONB NULL,          -- original headers + broker failure details
+  reason        TEXT,                -- failure / last error stack trace
   consumer      TEXT NULL,
   received_at   TIMESTAMPTZ,
   replayed_at   TIMESTAMPTZ NULL
 )
--- indexes: (business_key, source, received_at), (type, received_at)
+-- indexes: (business_key, source, received_at), (type, received_at), (replayed_at, received_at)
 ```
 
-Note the `fyke_dlq` table does double duty: publish-side DEAD rows (R3) and consumer-side poison messages (R4) land in the same table, distinguished by `source` — that's what makes "everything that happened for `order_X`" a single R5 query.
+Note the `fyke_dlq` table does double duty: publish-side DEAD rows (R3) and consumer-side poison messages (R4) land in the same table, distinguished by `source`. With generic `destination`, `target`, and `headers`, the in-JVM `Fyke.replay(id)` can re-dispatch either to its destination via the configured binder without needing broker-specific hacks.

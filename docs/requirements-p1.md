@@ -14,61 +14,66 @@ The outbox row is written in the **same DB transaction** as the domain write. Th
 - Programmatic: `Fyke.send(...)` — registers the event with the **active Spring `@Transactional` context**; the row is flushed on commit, dropped on rollback.
 - If no transaction is active, the row is written in its own transaction (logged as a config smell, but never fails silently).
 
-Delivery is **at-least-once**. The publisher dedupes on a client-supplied (or derived) `idempotency_key`.
+Delivery is **at-least-once**. The publisher dedupes on a client-supplied (or derived) `idempotency_key` via a unique constraint in `fyke_outbox`, and attaches the key to message headers for downstream consumer deduplication.
 
 **Acceptance criteria**
 
-- Given a transaction that commits, then the JVM is **killed before publish** → after restart, the event is delivered exactly once to the broker.
-- Given two sends with the same `idempotency_key` → the broker receives the message once.
+- Given a transaction that commits, then the JVM is **killed before publish** → after restart, the event is delivered to the broker.
+- Given two sends with the same `idempotency_key` → second send is rejected at outbox store level; broker receives the message once.
 - Given a transaction that **rolls back** → no outbox row exists, nothing published.
 
-## R2 — Efficient poller (the dealbreaker fix)
+## R2 — Efficient poller & Partitioning (the dealbreaker fix)
 
 Naive `SELECT … FOR UPDATE` polling causes row-lock contention and I/O bloat (interviews: Markus, Priya). The poller:
 
-- **`PgNotifyChannel`** — the Postgres zero-latency path: `LISTEN` on the outbox channel; `NOTIFY` is a *wakeup hint only* — the poller **always re-queries** (a lost hint must never lose a message). Requires **Postgres ≥ 14** (transactional `NOTIFY` in the same tx as the row insert).
-- **`TimerChannel`** — the fallback for non-Postgres JDBC DBs (and when LISTEN/NOTIFY is unavailable): interval poll with **backoff when idle**.
+- **`PgNotifyChannel`** — the Postgres zero-latency path: dedicated physical connection with `LISTEN` on the outbox channel; `NOTIFY` is a *wakeup hint only* — the poller **always re-queries** (a lost hint must never lose a message). Auto-reconnects on connection drops. Requires **Postgres ≥ 14**.
+- **`TimerChannel`** — the fallback for non-Postgres JDBC DBs and idle backoff.
+- **`PartitionResolver`** — SPI to assign events to partitions (`SinglePartitionResolver` for global FIFO; `BusinessKeyPartitionResolver` for per-key/tenant FIFO).
+- **`PartitionLocker`** — Claims partition processing rights across multiple instances using Postgres transaction advisory locks (`pg_try_advisory_xact_lock`), with graceful in-JVM lock fallback for non-Postgres/H2.
 - **`BatchClaimer`** — claims a batch via `SELECT … FOR UPDATE SKIP LOCKED` (PG), ordered by `seq`, with a **lease** (`lease_expires_at`) so crashed pollers are re-claimed.
-- **Idle-safe:** zero CPU when there is nothing to do (NOTIFY-driven or backoff).
+- **Idle-safe:** near-zero CPU when there is nothing to do (NOTIFY-driven or backoff).
 
 **Acceptance criteria**
 
 - New event is published **≤ ~100 ms** after commit on the NOTIFY path, with a 10k-row backlog present.
-- **50 concurrent committers** → no lock waits, no starvation, all batches processed.
+- **50 concurrent committers** across partitions → no lock waits, no starvation, all batches processed in strict per-partition FIFO order.
 - Idle system (no events) → near-zero CPU and minimal query volume.
-- Kill the poller mid-batch (lease expires) → another poller claims the same rows; messages published, deduplicated.
+- Kill the poller mid-batch (lease expires) → another poller claims the same rows; messages published.
 
 ## R3 — Binder SPI + RabbitMQ binder
 
-The binder is an **SPI** with four operations: `publish`, `ack` (confirm/consumed), `purge`, and **DLQ-attach** (how a consumer failure reaches the DLQ). **Core must never reference a concrete broker** (AGENTS.md #7).
+The binder is an **SPI** with four operations: `publish`, `ack` (confirm/consumed), `purge`, and **DLQ-attach** (how a consumer failure reaches the DLQ). Binders consume generic `destination`, `target`, and `headers` without broker-specific coupling. **Core must never reference a concrete broker** (AGENTS.md #7).
 
 **RabbitBinder** (first implementation):
 
 - Publisher confirms (transactional or mandatory+confirm).
-- Exponential backoff with jitter; after `maxAttempts` → mark row **DEAD**, copy payload into `fyke_dlq`.
+- Sends raw `payload` bytes directly to exchange (`destination`) with routing key (`target`) and `headers`.
+- Exponential backoff with jitter; after `maxAttempts` → mark row **DEAD**, copy payload and metadata into `fyke_dlq`.
 - `ack`/`purge` wired to the confirm/ack semantics of Rabbit.
 
 **Acceptance criteria**
 
 - Broker **down** at publish time → backoff, no loss; when the broker returns, the backlog drains.
-- After restart → backlog drains, **no duplicates** on the broker (idempotency key + delivery tags).
+- After restart → backlog drains, broker receives all confirmed messages.
 - A message that always fails confirm → ends up in `fyke_dlq` with status DEAD; the poller continues with the rest of the batch.
 
 ## R4 — Consumer-side DLQ / poison capture
 
 Fyke is not only about the *publish* side (interview: Dave). The agent captures **consumer failures**:
 
-- Helper integration with Spring AMQP's error handling (retry → **DLX/DLQ**): a poison message that exhausts redeliveries lands in `fyke_dlq` with payload, failure reason, attempt count, consumer name, business key.
+- Helper integration with Spring AMQP's error handling (`FykeFatalExceptionStrategy` / `MessageRecoverer`): a poison message that exhausts redeliveries lands in `fyke_dlq` with payload bytes, failure reason, attempt count, consumer name, business key, original destination, and headers.
 - The consumer keeps processing **other** messages; one poison pill must not wedge the queue.
+- Replayable in-JVM via `Fyke.replay(id)` back to the original destination.
 
 **Acceptance criteria**
 
 - A message that throws on every delivery → after N redeliveries it is in `fyke_dlq`, queryable, with reason + attempts recorded.
 - While one message is poisoning, other messages on the same queue continue to process normally.
+- In-JVM `Fyke.replay(id)` re-publishes the DLQ message to its original destination.
 
 ## R5 — Metadata + business-key index
 
-Both `fyke_outbox` and `fyke_dlq` carry a standard metadata block: `type`, `business_key`, `status`, `created/updated/published/consumed_at`, `consumer`, `correlation_id`, `trace_id`, `size`, `content_hash`.
+Both `fyke_outbox` and `fyke_dlq` carry a standard metadata block: `partition_key`, `type`, `destination`, `target`, `business_key`, `status`, `content_type`, `created/updated/published_at`, `consumer`, `correlation_id`, `trace_id`, `size`, `payload_hash`, `headers`.
 
 Indexes: `(business_key, status)` and `(type, status, created_at)` on both tables.
 
@@ -121,9 +126,20 @@ A standalone demo + the **CI proof**: Testcontainers **Postgres + RabbitMQ**, th
 
 **Acceptance criteria**
 
-- All three scenarios pass in CI (`./gradlew build`), headless, no external services.
+## R10 — Retention & Housekeeping (the table-bloat fix)
+
+High-throughput event outboxes accumulate millions of rows quickly. Without automated cleanup, Postgres tables suffer dead tuple bloat and disk exhaustion:
+
+- Configurable retention periods: `fyke.retention.outbox-ttl` (default: 7 days) and `fyke.retention.dlq-ttl` (default: 30 days).
+- Background cleanup worker: runs on a low-frequency timer (`fyke.retention.purge-interval`, default: 1 hour), deleting published outbox rows and replayed DLQ messages in bounded chunks (`batch-size`, default: 1000) to prevent lock spikes and WAL storms.
+
+**Acceptance criteria**
+
+- Published events older than `outbox-ttl` are purged by the cleaner.
+- Unprocessed events (`NEW`, `DISPATCHING`) and unreplayed `DEAD` events are never purged.
 
 ---
+
 
 ## Definition of done (P1)
 
