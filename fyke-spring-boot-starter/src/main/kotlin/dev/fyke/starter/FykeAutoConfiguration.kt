@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.amqp.rabbit.connection.ConnectionFactory
 import org.springframework.amqp.rabbit.core.RabbitTemplate
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
@@ -174,8 +175,8 @@ class FykeAutoConfiguration {
 		return FykeRabbitDlqRecoverer(outboxStore, telemetry)
 	}
 
-	@Bean
-	fun notificationSources(
+	@Bean("outboxNotificationSources")
+	fun outboxNotificationSources(
 		dataSource: DataSource,
 		properties: FykeProperties
 	): List<NotificationSource> {
@@ -184,9 +185,9 @@ class FykeAutoConfiguration {
 
 		val channelMode = properties.poller.channel
 		if ((channelMode == FykeProperties.PollerChannel.AUTO || channelMode == FykeProperties.PollerChannel.PG_NOTIFY) && isPostgres) {
-			sources.add(PgNotifyChannel(connectionSupplier = { dataSource.connection }))
+			sources.add(PgNotifyChannel(connectionSupplier = { dataSource.connection }, channelName = "fyke_events"))
 		} else if (!isPostgres) {
-			log.info("Fyke: Non-PostgreSQL database detected. Using TimerChannel fallback interval polling.")
+			log.info("Fyke: Non-PostgreSQL database detected. Using TimerChannel fallback interval polling for outbox.")
 		}
 
 		// Always register TimerChannel for idle safety-net and fallback
@@ -200,13 +201,39 @@ class FykeAutoConfiguration {
 		return sources
 	}
 
+	@Bean("inboxNotificationSources")
+	fun inboxNotificationSources(
+		dataSource: DataSource,
+		properties: FykeProperties
+	): List<NotificationSource> {
+		val sources = mutableListOf<NotificationSource>()
+		val isPostgres = isPostgres(dataSource)
+
+		val channelMode = properties.inbox.channel
+		if ((channelMode == FykeProperties.PollerChannel.AUTO || channelMode == FykeProperties.PollerChannel.PG_NOTIFY) && isPostgres) {
+			sources.add(PgNotifyChannel(connectionSupplier = { dataSource.connection }, channelName = "fyke_inbox_events"))
+		} else if (!isPostgres) {
+			log.info("Fyke: Non-PostgreSQL database detected. Using TimerChannel fallback interval polling for inbox.")
+		}
+
+		// Always register TimerChannel for idle safety-net and fallback
+		sources.add(
+			TimerChannel(
+				initialDelayMs = properties.inbox.initialDelay.toMillis(),
+				pollIntervalMs = properties.inbox.pollInterval.toMillis()
+			)
+		)
+
+		return sources
+	}
+
 	@Bean
 	@ConditionalOnMissingBean
 	fun pollerEngine(
 		outboxStore: OutboxStore,
 		brokerBinderProvider: ObjectProvider<BrokerBinder>,
 		partitionLocker: PartitionLocker,
-		notificationSources: List<NotificationSource>,
+		@Qualifier("outboxNotificationSources") outboxNotificationSources: List<NotificationSource>,
 		telemetry: FykeTelemetry,
 		dataSource: DataSource,
 		properties: FykeProperties
@@ -217,14 +244,15 @@ class FykeAutoConfiguration {
 			outboxStore = outboxStore,
 			brokerBinder = brokerBinder,
 			partitionLocker = partitionLocker,
-			notificationSources = notificationSources,
+			notificationSources = outboxNotificationSources,
 			telemetry = telemetry,
 			dataSource = dataSource,
 			batchSize = properties.poller.batchSize,
 			leaseDuration = properties.poller.leaseDuration,
 			maxAttempts = properties.poller.maxAttempts,
 			initialBackoffMs = properties.poller.initialBackoff.toMillis(),
-			backoffMultiplier = properties.poller.backoffMultiplier
+			backoffMultiplier = properties.poller.backoffMultiplier,
+			concurrency = properties.poller.concurrency
 		)
 	}
 
@@ -254,6 +282,7 @@ class FykeAutoConfiguration {
 		inboxStore: InboxStore,
 		outboxStore: OutboxStore,
 		partitionLocker: PartitionLocker,
+		@Qualifier("inboxNotificationSources") inboxNotificationSources: List<NotificationSource>,
 		serializer: FykePayloadSerializer,
 		telemetry: FykeTelemetry,
 		dataSource: DataSource,
@@ -263,6 +292,7 @@ class FykeAutoConfiguration {
 			inboxStore = inboxStore,
 			outboxStore = outboxStore,
 			partitionLocker = partitionLocker,
+			notificationSources = inboxNotificationSources,
 			serializer = serializer,
 			telemetry = telemetry,
 			dataSource = dataSource,
@@ -271,7 +301,6 @@ class FykeAutoConfiguration {
 			maxAttempts = properties.inbox.maxAttempts,
 			initialBackoffMs = properties.inbox.initialBackoff.toMillis(),
 			backoffMultiplier = properties.inbox.backoffMultiplier,
-			pollIntervalMs = properties.inbox.pollInterval.toMillis(),
 			concurrency = properties.inbox.concurrency
 		)
 	}

@@ -7,136 +7,61 @@ import dev.fyke.core.model.OutboxStatus
 import dev.fyke.core.partition.PartitionLocker
 import dev.fyke.core.store.OutboxStore
 import dev.fyke.core.telemetry.FykeTelemetry
-import org.slf4j.LoggerFactory
-import java.sql.Connection
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
-import kotlin.math.pow
-import kotlin.random.Random
 
 /**
- * Main coordinator managing batch claiming, partition mutual-exclusion, broker dispatch, and retry/DLQ lifecycles.
+ * Main coordinator managing outbox batch claiming, partition mutual-exclusion, broker dispatch, and retry/DLQ lifecycles.
  */
 class PollerEngine(
 	private val outboxStore: OutboxStore,
 	private val brokerBinder: BrokerBinder,
-	private val partitionLocker: PartitionLocker,
-	private val notificationSources: List<NotificationSource>,
+	partitionLocker: PartitionLocker,
+	notificationSources: List<NotificationSource>,
 	private val telemetry: FykeTelemetry,
-	private val dataSource: DataSource,
-	private val batchSize: Int = 50,
-	private val leaseDuration: Duration = Duration.ofSeconds(30),
+	dataSource: DataSource,
+	batchSize: Int = 50,
+	leaseDuration: Duration = Duration.ofSeconds(30),
 	private val maxAttempts: Int = 5,
-	private val initialBackoffMs: Long = 1000L,
-	private val backoffMultiplier: Double = 1.5
+	initialBackoffMs: Long = 1000L,
+	backoffMultiplier: Double = 1.5,
+	concurrency: Int = 1
+) : AbstractPollerEngine<OutboxRecord>(
+	partitionLocker = partitionLocker,
+	notificationSources = notificationSources,
+	dataSource = dataSource,
+	batchSize = batchSize,
+	leaseDuration = leaseDuration,
+	concurrency = concurrency,
+	threadPrefix = "fyke-poller"
 ) {
-	private val log = LoggerFactory.getLogger(javaClass)
-	private val running = AtomicBoolean(false)
-	private val polling = AtomicBoolean(false)
-	private var executor: ExecutorService? = null
 
-	fun start() {
-		if (!running.compareAndSet(false, true)) return
+	private val backoffPolicy = BackoffPolicy(
+		initialBackoffMs = initialBackoffMs,
+		backoffMultiplier = backoffMultiplier,
+		withJitter = true
+	)
 
-		val exec = Executors.newSingleThreadExecutor { r ->
-			Thread(r, "fyke-poller-engine").apply { isDaemon = true }
-		}
-		executor = exec
-
-		notificationSources.forEach { source ->
-			source.start {
-				triggerPoll()
-			}
-		}
-
-		// Trigger initial catch-up sweep
-		triggerPoll()
-		log.info("Fyke: Poller engine started (batchSize={}, leaseDuration={}, maxAttempts={})", batchSize, leaseDuration, maxAttempts)
+	override fun findPendingPartitions(): List<String> {
+		return outboxStore.findPendingPartitions()
 	}
 
-	fun stop() {
-		if (running.compareAndSet(true, false)) {
-			notificationSources.forEach { it.stop() }
-			executor?.shutdownNow()
-			executor = null
-			log.info("Fyke: Poller engine stopped")
-		}
+	override fun claimBatch(partition: String): List<OutboxRecord> {
+		return outboxStore.claimBatch(batchSize, leaseDuration, partition)
 	}
 
-	fun triggerPoll() {
-		if (!running.get()) return
-		executor?.execute {
-			if (polling.compareAndSet(false, true)) {
-				try {
-					var processed: Int
-					do {
-						processed = pollOnce()
-					} while (processed > 0 && running.get())
-				} catch (e: Exception) {
-					log.error("Fyke: Unexpected error during outbox poll loop: {}", e.message, e)
-				} finally {
-					polling.set(false)
-				}
-			}
-		}
+	override fun onNoPendingPartitions() {
+		telemetry.updateBacklogDepth(0)
 	}
 
-	fun pollOnce(): Int {
-		val partitions = outboxStore.findPendingPartitions()
-		if (partitions.isEmpty()) {
-			telemetry.updateBacklogDepth(0)
-			return 0
-		}
-
-		var totalProcessed = 0
-
-		for (partition in partitions) {
-			if (!running.get()) break
-
-			var conn: Connection? = null
-			try {
-				conn = dataSource.connection
-				conn.autoCommit = false
-
-				val locked = partitionLocker.tryLock(partition, conn)
-				if (!locked) {
-					continue
-				}
-
-				try {
-					val batch = outboxStore.claimBatch(batchSize, leaseDuration, partition)
-					if (batch.isEmpty()) {
-						continue
-					}
-
-					for (record in batch) {
-						if (!running.get()) break
-						processRecord(record)
-						totalProcessed++
-					}
-				} finally {
-					partitionLocker.unlock(partition, conn)
-					conn.commit()
-				}
-			} catch (e: Exception) {
-				log.warn("Fyke: Error processing partition '{}': {}", partition, e.message)
-				try { conn?.rollback() } catch (_: Exception) {}
-			} finally {
-				try { conn?.close() } catch (_: Exception) {}
-			}
-		}
-
+	override fun onBatchCompleted() {
 		val pending = outboxStore.countPending()
 		telemetry.updateBacklogDepth(pending)
-		return totalProcessed
 	}
 
-	private fun processRecord(record: OutboxRecord) {
+	override fun processRecord(record: OutboxRecord) {
 		val startTime = System.currentTimeMillis()
 		val result = try {
 			brokerBinder.publish(record)
@@ -148,8 +73,10 @@ class PollerEngine(
 			is PublishResult.Success -> {
 				outboxStore.markPublished(record.id, Instant.now())
 				telemetry.recordPublished(durationMs)
-				log.debug("Fyke: Successfully published record {} (type={}, businessKey={}) in {} ms",
-					record.id, record.type, record.businessKey, durationMs)
+				log.debug(
+					"Fyke: Successfully published record {} (type={}, businessKey={}) in {} ms",
+					record.id, record.type, record.businessKey, durationMs
+				)
 			}
 			is PublishResult.TransientFailure -> {
 				telemetry.recordPublishFailure()
@@ -160,10 +87,12 @@ class PollerEngine(
 					outboxStore.markDead(record.id, reason)
 					telemetry.recordDlqMessage()
 				} else {
-					val backoff = calculateBackoff(nextAttempt)
+					val backoff = backoffPolicy.calculate(nextAttempt)
 					val nextAttemptAt = Instant.now().plusMillis(backoff)
-					log.warn("Fyke: Publish failed for record {} (attempt {}/{}); retrying in {} ms: {}",
-						record.id, nextAttempt, maxAttempts, backoff, result.cause.message)
+					log.warn(
+						"Fyke: Publish failed for record {} (attempt {}/{}); retrying in {} ms: {}",
+						record.id, nextAttempt, maxAttempts, backoff, result.cause.message
+					)
 					outboxStore.markRetry(record.id, nextAttempt, nextAttemptAt)
 				}
 			}
@@ -217,11 +146,5 @@ class PollerEngine(
 
 		log.warn("Fyke: Cannot replay record {}: not found in DLQ or Outbox", id)
 		return false
-	}
-
-	private fun calculateBackoff(attempt: Int): Long {
-		val multiplier = backoffMultiplier.pow(attempt - 1)
-		val jitter = Random.nextDouble(0.8, 1.2)
-		return (initialBackoffMs * multiplier * jitter).toLong()
 	}
 }

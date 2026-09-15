@@ -10,6 +10,7 @@ import org.postgresql.util.PGobject
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
+import org.springframework.jdbc.datasource.DataSourceUtils
 import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
@@ -70,7 +71,7 @@ class JdbcInboxStore(
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		""".trimIndent()
 
-		jdbcTemplate.update { conn ->
+		val count = jdbcTemplate.update { conn ->
 			val ps = conn.prepareStatement(sql)
 			ps.setObject(1, record.id)
 			ps.setString(2, record.partitionKey)
@@ -90,7 +91,10 @@ class JdbcInboxStore(
 			ps.setInt(16, record.attempts)
 			ps
 		}
-		return true
+		if (count > 0) {
+			notifyPostgres()
+		}
+		return count > 0
 	}
 
 	override fun findById(id: UUID): InboxRecord? {
@@ -168,7 +172,11 @@ class JdbcInboxStore(
 	override fun retryNow(id: UUID): Boolean {
 		val now = Instant.now()
 		val sql = "UPDATE fyke_inbox SET status = 'NEW', next_attempt_at = ?, updated_at = ? WHERE id = ? AND status IN ('NEW', 'PROCESSING')"
-		return jdbcTemplate.update(sql, Timestamp.from(now), Timestamp.from(now), id) > 0
+		val updated = jdbcTemplate.update(sql, Timestamp.from(now), Timestamp.from(now), id) > 0
+		if (updated) {
+			notifyPostgres()
+		}
+		return updated
 	}
 
 	override fun searchByBusinessKey(businessKey: String): List<FykeRecordSummary> {
@@ -235,6 +243,24 @@ class JdbcInboxStore(
 			objectMapper.readValue(json, object : TypeReference<Map<String, String>>() {})
 		} catch (e: Exception) {
 			null
+		}
+	}
+
+	private fun notifyPostgres() {
+		try {
+			val conn = DataSourceUtils.getConnection(dataSource)
+			try {
+				val isPostgres = conn.metaData.databaseProductName.equals("PostgreSQL", ignoreCase = true)
+				if (isPostgres) {
+					conn.createStatement().use { stmt ->
+						stmt.execute("SELECT pg_notify('fyke_inbox_events', '1')")
+					}
+				}
+			} finally {
+				DataSourceUtils.releaseConnection(conn, dataSource)
+			}
+		} catch (e: Exception) {
+			log.debug("Failed to execute transactional pg_notify for inbox: {}", e.message)
 		}
 	}
 }

@@ -54,7 +54,9 @@ data class FykeProperties(
 		/** Exponential backoff multiplier for retries. */
 		var backoffMultiplier: Double = 1.5,
 		/** Channel notification strategy (AUTO, PG_NOTIFY, TIMER). */
-		var channel: PollerChannel = PollerChannel.AUTO
+		var channel: PollerChannel = PollerChannel.AUTO,
+		/** Number of concurrent worker threads processing partitions in the outbox poller. */
+		var concurrency: Int = 1
 	)
 
 	/**
@@ -99,14 +101,18 @@ data class FykeProperties(
 		var leaseDuration: Duration = Duration.ofSeconds(30),
 		/** Maximum delivery attempts before moving an inbox message to DLQ. */
 		var maxAttempts: Int = 5,
-		/** Interval for the periodic inbox poller. */
+		/** Interval for the periodic inbox fallback timer. */
 		var pollInterval: Duration = Duration.ofMillis(500),
+		/** Initial delay before the periodic timer starts. */
+		var initialDelay: Duration = Duration.ofMillis(1000),
 		/** Initial retry backoff duration for failed consumer executions. */
 		var initialBackoff: Duration = Duration.ofMillis(1000),
 		/** Exponential backoff multiplier for retries. */
 		var backoffMultiplier: Double = 1.5,
 		/** Number of concurrent worker threads processing partitions in the inbox poller. */
-		var concurrency: Int = 4
+		var concurrency: Int = 4,
+		/** Channel notification strategy (AUTO, PG_NOTIFY, TIMER). */
+		var channel: PollerChannel = PollerChannel.AUTO
 	)
 
 	/**
