@@ -2,7 +2,7 @@ package dev.fyke.binder.rabbit
 
 import dev.fyke.core.model.DlqRecord
 import dev.fyke.core.model.DlqSource
-import dev.fyke.core.store.OutboxStore
+import dev.fyke.core.outbox.OutboxStore
 import dev.fyke.core.telemetry.FykeTelemetry
 import io.mockk.every
 import io.mockk.mockk

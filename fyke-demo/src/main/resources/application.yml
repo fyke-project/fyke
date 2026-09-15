@@ -21,17 +21,27 @@ spring:
 
 fyke:
   enabled: true
-  poller:
+  outbox:
     enabled: true
     poll-interval: 200ms
     batch-size: 50
+    retention:
+      enabled: true
+      ttl: 7d
+
   inbox:
     enabled: true
     poll-interval: 200ms
     batch-size: 50
     initial-backoff: 500ms
+    retention:
+      enabled: true
+      ttl: 7d
+
+  dlq:
+    retention:
+      enabled: true
+      ttl: 30d
+
   retention:
     enabled: true
-    outbox-ttl: 7d
-    inbox-ttl: 7d
-    dlq-ttl: 30d

@@ -1,11 +1,13 @@
 package dev.fyke.starter
 
+import dev.fyke.core.inbox.InboxPollerEngine
+import dev.fyke.core.inbox.InboxStore
 import dev.fyke.core.model.FykeRecordSummary
 import dev.fyke.core.model.OutboxEvent
 import dev.fyke.core.model.OutboxRecord
-import dev.fyke.core.poller.PollerEngine
-import dev.fyke.core.store.OutboxStore
-import dev.fyke.core.store.OutboxWriter
+import dev.fyke.core.outbox.OutboxPollerEngine
+import dev.fyke.core.outbox.OutboxStore
+import dev.fyke.core.outbox.OutboxWriter
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -18,7 +20,7 @@ import java.util.UUID
 class FykeFacadeTest {
 
 	private val writer = mockk<OutboxWriter>()
-	private val poller = mockk<PollerEngine>()
+	private val poller = mockk<OutboxPollerEngine>()
 	private val store = mockk<OutboxStore>()
 
 	@BeforeEach
@@ -48,7 +50,7 @@ class FykeFacadeTest {
 	}
 
 	@Test
-	fun `Fyke replay should delegate to PollerEngine`() {
+	fun `Fyke replay should delegate to OutboxPollerEngine`() {
 		val id = UUID.randomUUID()
 		every { poller.replay(id) } returns true
 
@@ -82,8 +84,8 @@ class FykeFacadeTest {
 
 	@Test
 	fun `Fyke retryInbox should delegate to InboxStore and trigger poller`() {
-		val inboxStore = mockk<dev.fyke.core.inbox.InboxStore>()
-		val inboxPoller = mockk<dev.fyke.core.inbox.InboxPollerEngine>(relaxed = true)
+		val inboxStore = mockk<InboxStore>()
+		val inboxPoller = mockk<InboxPollerEngine>(relaxed = true)
 		Fyke.initialize(writer, poller, store, inboxStore, inboxPoller)
 
 		val id = UUID.randomUUID()

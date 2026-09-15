@@ -5,7 +5,7 @@ import dev.fyke.core.model.InboxRecord
 import dev.fyke.core.model.InboxStatus
 import dev.fyke.core.partition.SingleWorkerPartitionLocker
 import dev.fyke.core.serializer.JacksonFykePayloadSerializer
-import dev.fyke.core.store.OutboxStore
+import dev.fyke.core.outbox.OutboxStore
 import dev.fyke.core.telemetry.ClientSideSanitizer
 import dev.fyke.core.telemetry.FykeTelemetry
 import io.mockk.*

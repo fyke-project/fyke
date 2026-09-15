@@ -70,17 +70,34 @@ Optional configuration in `application.yml`:
 ```yaml
 fyke:
   enabled: true
-  poller:
+  outbox:
     channel: auto          # AUTO (uses PG_NOTIFY on Postgres), PG_NOTIFY, or TIMER
     batch-size: 50
     lease-duration: 30s
     max-attempts: 5
     poll-interval: 1000ms  # Fallback safety timer
+    concurrency: 1
+    retention:
+      enabled: true
+      ttl: 7d              # Delete published outbox records after 7 days
+  inbox:
+    channel: auto
+    batch-size: 50
+    lease-duration: 30s
+    max-attempts: 5
+    poll-interval: 500ms
+    concurrency: 4
+    retention:
+      enabled: true
+      ttl: 14d             # At-least-once deduplication window
+  dlq:
+    retention:
+      enabled: true
+      ttl: 30d             # Retain DLQ records for incident triage
   retention:
-    enabled: true
-    outbox-ttl: 7d         # Delete published outbox records after 7 days
-    dlq-ttl: 30d           # Delete replayed DLQ records after 30 days
+    enabled: true          # Cleaner daemon master switch
     purge-interval: 1h     # Run retention cleaner every hour
+    batch-size: 1000
   rabbitmq:
     confirm-timeout: 5s    # Publisher confirm timeout
 ```
@@ -197,7 +214,7 @@ if (replayed) {
 
 | Module | Description |
 |---|---|
-| `fyke-core` | Core domain models, Liquibase changelog, `OutboxStore`, `PollerEngine`, partitioning, retention cleaner, and OpenTelemetry. |
+| `fyke-core` | Core domain models, Liquibase changelog, `OutboxStore`, `InboxStore`, `OutboxPollerEngine`, `InboxPollerEngine`, partitioning, retention cleaner, and OpenTelemetry. |
 | `fyke-binder-rabbitmq` | Spring AMQP RabbitMQ binder with publisher confirms and `FykeRabbitDlqRecoverer`. |
 | `fyke-spring-boot-starter` | Spring Boot 4 auto-configuration and `Fyke` static facade. |
 | `fyke-demo` | Complete demonstration app with Testcontainers verification suite. |

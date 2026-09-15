@@ -8,7 +8,7 @@ import dev.fyke.core.poller.AbstractPollerEngine
 import dev.fyke.core.poller.BackoffPolicy
 import dev.fyke.core.poller.NotificationSource
 import dev.fyke.core.serializer.FykePayloadSerializer
-import dev.fyke.core.store.OutboxStore
+import dev.fyke.core.outbox.OutboxStore
 import dev.fyke.core.telemetry.FykeTelemetry
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method

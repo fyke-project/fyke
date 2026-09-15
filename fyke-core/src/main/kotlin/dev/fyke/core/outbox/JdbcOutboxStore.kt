@@ -1,4 +1,4 @@
-package dev.fyke.core.store
+package dev.fyke.core.outbox
 
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper

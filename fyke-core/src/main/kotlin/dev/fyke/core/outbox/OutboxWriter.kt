@@ -1,4 +1,4 @@
-package dev.fyke.core.store
+package dev.fyke.core.outbox
 
 import dev.fyke.core.model.OutboxEvent
 import dev.fyke.core.model.OutboxRecord

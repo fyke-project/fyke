@@ -1,11 +1,13 @@
-package dev.fyke.core.poller
+package dev.fyke.core.outbox
 
 import dev.fyke.core.binder.BrokerBinder
 import dev.fyke.core.binder.PublishResult
 import dev.fyke.core.model.OutboxRecord
 import dev.fyke.core.model.OutboxStatus
 import dev.fyke.core.partition.PartitionLocker
-import dev.fyke.core.store.OutboxStore
+import dev.fyke.core.poller.AbstractPollerEngine
+import dev.fyke.core.poller.BackoffPolicy
+import dev.fyke.core.poller.NotificationSource
 import dev.fyke.core.telemetry.FykeTelemetry
 import java.time.Duration
 import java.time.Instant
@@ -15,7 +17,7 @@ import javax.sql.DataSource
 /**
  * Main coordinator managing outbox batch claiming, partition mutual-exclusion, broker dispatch, and retry/DLQ lifecycles.
  */
-class PollerEngine(
+class OutboxPollerEngine(
 	private val outboxStore: OutboxStore,
 	private val brokerBinder: BrokerBinder,
 	partitionLocker: PartitionLocker,
@@ -35,7 +37,7 @@ class PollerEngine(
 	batchSize = batchSize,
 	leaseDuration = leaseDuration,
 	concurrency = concurrency,
-	threadPrefix = "fyke-poller"
+	threadPrefix = "fyke-outbox"
 ) {
 
 	private val backoffPolicy = BackoffPolicy(

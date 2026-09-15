@@ -1,11 +1,13 @@
 package dev.fyke.starter
 
+import dev.fyke.core.inbox.InboxPollerEngine
+import dev.fyke.core.inbox.InboxStore
 import dev.fyke.core.model.FykeRecordSummary
 import dev.fyke.core.model.OutboxEvent
 import dev.fyke.core.model.OutboxRecord
-import dev.fyke.core.poller.PollerEngine
-import dev.fyke.core.store.OutboxStore
-import dev.fyke.core.store.OutboxWriter
+import dev.fyke.core.outbox.OutboxPollerEngine
+import dev.fyke.core.outbox.OutboxStore
+import dev.fyke.core.outbox.OutboxWriter
 import java.util.UUID
 
 /**
@@ -17,27 +19,27 @@ object Fyke {
 	private var writer: OutboxWriter? = null
 
 	@Volatile
-	private var poller: PollerEngine? = null
+	private var outboxPoller: OutboxPollerEngine? = null
 
 	@Volatile
 	private var store: OutboxStore? = null
 
 	@Volatile
-	private var inboxStore: dev.fyke.core.inbox.InboxStore? = null
+	private var inboxStore: InboxStore? = null
 
 	@Volatile
-	private var inboxPoller: dev.fyke.core.inbox.InboxPollerEngine? = null
+	private var inboxPoller: InboxPollerEngine? = null
 
 	@JvmStatic
 	fun initialize(
 		writer: OutboxWriter,
-		poller: PollerEngine,
+		outboxPoller: OutboxPollerEngine,
 		store: OutboxStore,
-		inboxStore: dev.fyke.core.inbox.InboxStore? = null,
-		inboxPoller: dev.fyke.core.inbox.InboxPollerEngine? = null
+		inboxStore: InboxStore? = null,
+		inboxPoller: InboxPollerEngine? = null
 	) {
 		this.writer = writer
-		this.poller = poller
+		this.outboxPoller = outboxPoller
 		this.store = store
 		this.inboxStore = inboxStore
 		this.inboxPoller = inboxPoller
@@ -61,6 +63,7 @@ object Fyke {
 		destination: String,
 		businessKey: String,
 		payload: Any,
+		partitionKey: String? = null,
 		target: String? = null,
 		headers: Map<String, String>? = null
 	): OutboxRecord {
@@ -68,50 +71,54 @@ object Fyke {
 			OutboxEvent(
 				type = type,
 				destination = destination,
-				target = target,
 				businessKey = businessKey,
 				payload = payload,
+				partitionKey = partitionKey,
+				target = target,
 				headers = headers
 			)
 		)
 	}
 
 	/**
-	 * Replays a dead-letter or outbox event in-JVM via the configured broker binder.
-	 *
-	 * @param id The UUID of the outbox or DLQ record to replay.
-	 * @return true if confirmed by the broker, false otherwise.
+	 * Manually triggers replay of a dead-lettered or stuck event by ID in the application JVM (R6).
 	 */
 	@JvmStatic
 	fun replay(id: UUID): Boolean {
-		val p = poller ?: error("Fyke is not initialized.")
+		val p = outboxPoller ?: error("Fyke is not initialized. Ensure Spring application context has started.")
 		return p.replay(id)
 	}
 
 	/**
-	 * Immediately resets next_attempt_at for a retrying inbox event, triggering an immediate poll.
-	 *
-	 * @param id The UUID of the inbox record.
-	 * @return true if updated, false otherwise.
+	 * Immediately unblocks a retrying or stuck inbox record and triggers poller execution.
 	 */
 	@JvmStatic
 	fun retryInbox(id: UUID): Boolean {
-		val s = inboxStore ?: error("Fyke is not initialized with an InboxStore.")
-		val updated = s.retryNow(id)
-		if (updated) {
+		val s = inboxStore ?: error("Fyke inbox is not initialized.")
+		val unblocked = s.retryNow(id)
+		if (unblocked) {
 			inboxPoller?.triggerPoll()
 		}
-		return updated
+		return unblocked
 	}
 
 	/**
-	 * Searches all outbox, inbox, and DLQ events associated with a specific business key.
+	 * Searches outbox, DLQ, and inbox records by domain business key (R7).
 	 */
 	@JvmStatic
 	fun searchByBusinessKey(businessKey: String): List<FykeRecordSummary> {
-		val s = store ?: error("Fyke is not initialized.")
+		val s = store ?: error("Fyke is not initialized. Ensure Spring application context has started.")
 		val outboxAndDlq = s.searchByBusinessKey(businessKey)
-		val inbox = inboxStore?.searchByBusinessKey(businessKey) ?: emptyList()
-		return (outboxAndDlq + inbox).sortedBy { it.timestamp }
+		val inboxRecords = inboxStore?.searchByBusinessKey(businessKey) ?: emptyList()
+		return (outboxAndDlq + inboxRecords).sortedBy { it.timestamp }
+	}
+
+	@JvmSynthetic
+	internal fun reset() {
+		writer = null
+		outboxPoller = null
+		store = null
+		inboxStore = null
+		inboxPoller = null
 	}
 }

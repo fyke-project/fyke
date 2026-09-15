@@ -16,17 +16,17 @@ import dev.fyke.core.partition.PartitionResolver
 import dev.fyke.core.partition.PostgresAdvisoryPartitionLocker
 import dev.fyke.core.partition.SinglePartitionResolver
 import dev.fyke.core.partition.SingleWorkerPartitionLocker
+import dev.fyke.core.outbox.JdbcOutboxStore
+import dev.fyke.core.outbox.JdbcOutboxWriter
+import dev.fyke.core.outbox.OutboxPollerEngine
+import dev.fyke.core.outbox.OutboxStore
+import dev.fyke.core.outbox.OutboxWriter
 import dev.fyke.core.poller.NotificationSource
 import dev.fyke.core.poller.PgNotifyChannel
-import dev.fyke.core.poller.PollerEngine
 import dev.fyke.core.poller.TimerChannel
 import dev.fyke.core.retention.RetentionCleaner
 import dev.fyke.core.serializer.FykePayloadSerializer
 import dev.fyke.core.serializer.JacksonFykePayloadSerializer
-import dev.fyke.core.store.JdbcOutboxStore
-import dev.fyke.core.store.JdbcOutboxWriter
-import dev.fyke.core.store.OutboxStore
-import dev.fyke.core.store.OutboxWriter
 import dev.fyke.core.telemetry.ClientSideSanitizer
 import dev.fyke.core.telemetry.FykeTelemetry
 import dev.fyke.starter.annotation.FykeEvent
@@ -183,7 +183,7 @@ class FykeAutoConfiguration {
 		val sources = mutableListOf<NotificationSource>()
 		val isPostgres = isPostgres(dataSource)
 
-		val channelMode = properties.poller.channel
+		val channelMode = properties.outbox.channel
 		if ((channelMode == FykeProperties.PollerChannel.AUTO || channelMode == FykeProperties.PollerChannel.PG_NOTIFY) && isPostgres) {
 			sources.add(PgNotifyChannel(connectionSupplier = { dataSource.connection }, channelName = "fyke_events"))
 		} else if (!isPostgres) {
@@ -193,8 +193,8 @@ class FykeAutoConfiguration {
 		// Always register TimerChannel for idle safety-net and fallback
 		sources.add(
 			TimerChannel(
-				initialDelayMs = properties.poller.initialDelay.toMillis(),
-				pollIntervalMs = properties.poller.pollInterval.toMillis()
+				initialDelayMs = properties.outbox.initialDelay.toMillis(),
+				pollIntervalMs = properties.outbox.pollInterval.toMillis()
 			)
 		)
 
@@ -229,7 +229,7 @@ class FykeAutoConfiguration {
 
 	@Bean
 	@ConditionalOnMissingBean
-	fun pollerEngine(
+	fun outboxPollerEngine(
 		outboxStore: OutboxStore,
 		brokerBinderProvider: ObjectProvider<BrokerBinder>,
 		partitionLocker: PartitionLocker,
@@ -237,22 +237,22 @@ class FykeAutoConfiguration {
 		telemetry: FykeTelemetry,
 		dataSource: DataSource,
 		properties: FykeProperties
-	): PollerEngine {
+	): OutboxPollerEngine {
 		val brokerBinder = brokerBinderProvider.ifAvailable
 			?: error("No BrokerBinder bean available. Ensure fyke-binder-rabbitmq (with Spring AMQP) is on the classpath or define a custom BrokerBinder bean.")
-		return PollerEngine(
+		return OutboxPollerEngine(
 			outboxStore = outboxStore,
 			brokerBinder = brokerBinder,
 			partitionLocker = partitionLocker,
 			notificationSources = outboxNotificationSources,
 			telemetry = telemetry,
 			dataSource = dataSource,
-			batchSize = properties.poller.batchSize,
-			leaseDuration = properties.poller.leaseDuration,
-			maxAttempts = properties.poller.maxAttempts,
-			initialBackoffMs = properties.poller.initialBackoff.toMillis(),
-			backoffMultiplier = properties.poller.backoffMultiplier,
-			concurrency = properties.poller.concurrency
+			batchSize = properties.outbox.batchSize,
+			leaseDuration = properties.outbox.leaseDuration,
+			maxAttempts = properties.outbox.maxAttempts,
+			initialBackoffMs = properties.outbox.initialBackoff.toMillis(),
+			backoffMultiplier = properties.outbox.backoffMultiplier,
+			concurrency = properties.outbox.concurrency
 		)
 	}
 
@@ -264,7 +264,7 @@ class FykeAutoConfiguration {
 		serializer: FykePayloadSerializer,
 		partitionResolver: PartitionResolver,
 		telemetry: FykeTelemetry,
-		pollerEngineProvider: ObjectProvider<PollerEngine>
+		pollerEngineProvider: ObjectProvider<OutboxPollerEngine>
 	): OutboxWriter {
 		return JdbcOutboxWriter(
 			dataSource = dataSource,
@@ -334,9 +334,12 @@ class FykeAutoConfiguration {
 		return RetentionCleaner(
 			outboxStore = outboxStore,
 			inboxStore = inboxStore,
-			outboxTtl = properties.retention.outboxTtl,
-			inboxTtl = properties.retention.inboxTtl,
-			dlqTtl = properties.retention.dlqTtl,
+			outboxRetentionEnabled = properties.outbox.retention.enabled,
+			outboxTtl = properties.outbox.retention.ttl,
+			inboxRetentionEnabled = properties.inbox.retention.enabled,
+			inboxTtl = properties.inbox.retention.ttl,
+			dlqRetentionEnabled = properties.dlq.retention.enabled,
+			dlqTtl = properties.dlq.retention.ttl,
 			purgeInterval = properties.retention.purgeInterval,
 			batchSize = properties.retention.batchSize
 		)
@@ -344,7 +347,7 @@ class FykeAutoConfiguration {
 
 	@Bean
 	fun fykeLifecycle(
-		pollerEngine: PollerEngine,
+		outboxPollerEngine: OutboxPollerEngine,
 		inboxPollerEngine: InboxPollerEngine,
 		retentionCleaner: Optional<RetentionCleaner>,
 		outboxWriter: OutboxWriter,
@@ -356,9 +359,9 @@ class FykeAutoConfiguration {
 			private var running = false
 
 			override fun start() {
-				Fyke.initialize(outboxWriter, pollerEngine, outboxStore, inboxStore, inboxPollerEngine)
-				if (properties.poller.enabled) {
-					pollerEngine.start()
+				Fyke.initialize(outboxWriter, outboxPollerEngine, outboxStore, inboxStore, inboxPollerEngine)
+				if (properties.outbox.enabled) {
+					outboxPollerEngine.start()
 				}
 				if (properties.inbox.enabled) {
 					inboxPollerEngine.start()
@@ -370,7 +373,7 @@ class FykeAutoConfiguration {
 			override fun stop() {
 				retentionCleaner.ifPresent { it.stop() }
 				inboxPollerEngine.stop()
-				pollerEngine.stop()
+				outboxPollerEngine.stop()
 				running = false
 			}
 

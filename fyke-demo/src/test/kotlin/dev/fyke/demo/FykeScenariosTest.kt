@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import dev.fyke.core.model.OutboxEvent
 import dev.fyke.core.model.OutboxRecord
 import dev.fyke.core.model.OutboxStatus
-import dev.fyke.core.store.DuplicateIdempotencyKeyException
-import dev.fyke.core.store.OutboxStore
+import dev.fyke.core.outbox.DuplicateIdempotencyKeyException
+import dev.fyke.core.outbox.OutboxStore
 import dev.fyke.starter.Fyke
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
