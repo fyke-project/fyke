@@ -81,12 +81,22 @@ Updated `docs/requirements-p1.md`, `docs/architecture.md`, and `docs/decisions.m
 
 ---
 
+6. **LISTEN/NOTIFY for Inbox & Unified Poller Pipeline**:
+   - **`AbstractPollerEngine<T>`**: Unified base class managing lifecycle, `NotificationSource` attachments, non-blocking drain loops, worker pool concurrency (`concurrency > 1`), and per-partition mutual exclusion via `PartitionLocker`.
+   - **`BackoffPolicy`**: Encapsulates exponential backoff calculation with multiplier and jitter.
+   - **Zero-Latency Inbox Notification**: `JdbcInboxStore` issues `SELECT pg_notify('fyke_inbox_events', '1')` on PostgreSQL. `InboxPollerEngine` listens via `PgNotifyChannel("fyke_inbox_events")`, with safety-net `TimerChannel`.
+   - **Poller Refactoring**: Both `PollerEngine` and `InboxPollerEngine` extend `AbstractPollerEngine`.
+
+---
+
 ## 3. Current Status & Git History
 
-All tasks for **P1** are 100% complete, verified, and committed.
+All tasks for **P1** and Inbox enhancements are 100% complete, verified, and committed.
 
 ### Git Log
 ```text
+77c7c05 feat(poller): wire LISTEN/NOTIFY to inbox and extract AbstractPollerEngine
+9c6f680 feat(inbox): implement transactional inbox, @FykeListener, and per-partition ordering
 f9ecc5b build: exclude .idea directory from Spotless formatters
 940dc2a docs: add quickstart guide in README and initial changelog
 77122e9 feat(demo): add demo application, rest controller, and testcontainers suite
