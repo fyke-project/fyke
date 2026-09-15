@@ -6,5 +6,6 @@
         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
     <include file="db/changelog/01-init-tables.sql"/>
+    <include file="db/changelog/02-create-inbox-table.sql"/>
 
 </databaseChangeLog>

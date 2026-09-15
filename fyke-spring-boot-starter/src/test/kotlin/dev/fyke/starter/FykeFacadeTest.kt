@@ -79,4 +79,20 @@ class FykeFacadeTest {
 		assertThat(results).isEqualTo(summaries)
 		verify(exactly = 1) { store.searchByBusinessKey("ord-1") }
 	}
+
+	@Test
+	fun `Fyke retryInbox should delegate to InboxStore and trigger poller`() {
+		val inboxStore = mockk<dev.fyke.core.inbox.InboxStore>()
+		val inboxPoller = mockk<dev.fyke.core.inbox.InboxPollerEngine>(relaxed = true)
+		Fyke.initialize(writer, poller, store, inboxStore, inboxPoller)
+
+		val id = UUID.randomUUID()
+		every { inboxStore.retryNow(id) } returns true
+
+		val success = Fyke.retryInbox(id)
+
+		assertThat(success).isTrue()
+		verify(exactly = 1) { inboxStore.retryNow(id) }
+		verify(exactly = 1) { inboxPoller.triggerPoll() }
+	}
 }

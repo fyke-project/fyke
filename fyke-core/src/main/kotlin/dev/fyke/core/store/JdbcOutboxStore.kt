@@ -74,8 +74,8 @@ class JdbcOutboxStore(
 			INSERT INTO fyke_outbox (
 				id, partition_key, type, destination, target, business_key, idempotency_key,
 				status, content_type, payload, payload_hash, headers, correlation_id, trace_id,
-				size, created_at, updated_at, attempts
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				size, created_at, updated_at, attempts, next_attempt_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		""".trimIndent()
 
 		try {
@@ -99,6 +99,7 @@ class JdbcOutboxStore(
 				ps.setTimestamp(16, Timestamp.from(record.createdAt))
 				ps.setTimestamp(17, Timestamp.from(record.updatedAt))
 				ps.setInt(18, record.attempts)
+				ps.setTimestamp(19, record.nextAttemptAt?.let { Timestamp.from(it) })
 				ps
 			}
 		} catch (e: DuplicateKeyException) {
@@ -125,14 +126,19 @@ class JdbcOutboxStore(
 		val now = Instant.now()
 		val leaseExpiresAt = now.plus(leaseDuration)
 
-		// Select with FOR UPDATE SKIP LOCKED
 		val selectSql = """
-			SELECT * FROM fyke_outbox
-			WHERE partition_key = ?
-			AND status IN ('NEW', 'DISPATCHING')
-			AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-			AND (status = 'NEW' OR lease_expires_at <= ?)
-			ORDER BY seq ASC
+			SELECT o.* FROM fyke_outbox o
+			WHERE o.partition_key = ?
+			AND o.status IN ('NEW', 'DISPATCHING')
+			AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= ?)
+			AND (o.status = 'NEW' OR o.lease_expires_at <= ?)
+			AND NOT EXISTS (
+				SELECT 1 FROM fyke_outbox prev
+				WHERE prev.partition_key = o.partition_key
+				AND prev.status IN ('NEW', 'DISPATCHING')
+				AND prev.seq < o.seq
+			)
+			ORDER BY o.seq ASC
 			LIMIT ?
 			FOR UPDATE SKIP LOCKED
 		""".trimIndent()

@@ -16,7 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class RetentionCleaner(
 	private val outboxStore: OutboxStore,
+	private val inboxStore: dev.fyke.core.inbox.InboxStore? = null,
 	private val outboxTtl: Duration = Duration.ofDays(7),
+	private val inboxTtl: Duration = Duration.ofDays(7),
 	private val dlqTtl: Duration = Duration.ofDays(30),
 	private val purgeInterval: Duration = Duration.ofHours(1),
 	private val batchSize: Int = 1000
@@ -52,6 +54,7 @@ class RetentionCleaner(
 
 	fun clean(): CleanResult {
 		var totalOutboxPurged = 0
+		var totalInboxPurged = 0
 		var totalDlqPurged = 0
 
 		try {
@@ -61,22 +64,30 @@ class RetentionCleaner(
 				totalOutboxPurged += purged
 			} while (purged == batchSize && running.get())
 
+			inboxStore?.let { store ->
+				val inboxCutoff = Instant.now().minus(inboxTtl)
+				do {
+					val purged = store.purgeCompleted(inboxCutoff, batchSize)
+					totalInboxPurged += purged
+				} while (purged == batchSize && running.get())
+			}
+
 			val dlqCutoff = Instant.now().minus(dlqTtl)
 			do {
 				val purged = outboxStore.purgeDlq(dlqCutoff, batchSize)
 				totalDlqPurged += purged
 			} while (purged == batchSize && running.get())
 
-			if (totalOutboxPurged > 0 || totalDlqPurged > 0) {
-				log.info("Fyke: Retention cleanup completed: {} published outbox rows purged, {} DLQ rows purged",
-					totalOutboxPurged, totalDlqPurged)
+			if (totalOutboxPurged > 0 || totalInboxPurged > 0 || totalDlqPurged > 0) {
+				log.info("Fyke: Retention cleanup completed: {} published outbox rows purged, {} completed inbox rows purged, {} DLQ rows purged",
+					totalOutboxPurged, totalInboxPurged, totalDlqPurged)
 			}
 		} catch (e: Exception) {
 			log.warn("Fyke: Error during retention cleanup run: {}", e.message)
 		}
 
-		return CleanResult(totalOutboxPurged, totalDlqPurged)
+		return CleanResult(totalOutboxPurged, totalDlqPurged, totalInboxPurged)
 	}
 
-	data class CleanResult(val outboxPurged: Int, val dlqPurged: Int)
+	data class CleanResult(val outboxPurged: Int, val dlqPurged: Int, val inboxPurged: Int = 0)
 }

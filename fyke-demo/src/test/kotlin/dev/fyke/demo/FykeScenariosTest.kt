@@ -47,7 +47,13 @@ class FykeScenariosTest {
 	private lateinit var orderConsumer: OrderConsumer
 
 	@Autowired
+	private lateinit var orderInboxConsumer: OrderInboxConsumer
+
+	@Autowired
 	private lateinit var outboxStore: OutboxStore
+
+	@Autowired
+	private lateinit var inboxStore: dev.fyke.core.inbox.InboxStore
 
 	private val objectMapper: ObjectMapper = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().apply {
 		registerModule(com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
@@ -60,6 +66,9 @@ class FykeScenariosTest {
 	fun setUp() {
 		orderConsumer.receivedOrders.clear()
 		orderConsumer.failOnPoison = true
+		orderInboxConsumer.receivedOrders.clear()
+		orderInboxConsumer.failForOrderId = null
+		orderInboxConsumer.fatalError = false
 	}
 
 	@Test
@@ -184,5 +193,136 @@ class FykeScenariosTest {
 		val summaries = Fyke.searchByBusinessKey(orderId)
 		assertThat(summaries).isEmpty()
 		assertThat(orderConsumer.receivedOrders).doesNotContain(orderId)
+	}
+
+	@Test
+	fun `Scenario 6 - End-to-end Transactional Inbox receipt via @FykeListener`() {
+		val orderId = "order-inbox-e2e-${UUID.randomUUID()}"
+		orderService.createOrder(orderId, "Charlie", 59.0)
+
+		await.atMost(Duration.ofSeconds(10)).untilAsserted {
+			assertThat(orderInboxConsumer.receivedOrders).contains(orderId)
+		}
+
+		val summaries = Fyke.searchByBusinessKey(orderId)
+		assertThat(summaries.any { it.source == "INBOX" && it.status == "COMPLETED" }).isTrue()
+	}
+
+	@Test
+	fun `Scenario 7 - Transactional Inbox strict per-partition FIFO with retry backoff and instant unblock`() {
+		val partition = "tenant-${UUID.randomUUID()}"
+		val order1Id = "order-part-1-${UUID.randomUUID()}"
+		val order2Id = "order-part-2-${UUID.randomUUID()}"
+
+		// Order 1 will fail transiently
+		orderInboxConsumer.failForOrderId = order1Id
+
+		// Send Order 1
+		Fyke.send(
+			type = "OrderCreated",
+			destination = DemoApplication.EXCHANGE_NAME,
+			target = DemoApplication.ROUTING_KEY,
+			businessKey = order1Id,
+			payload = OrderCreatedPayload(order1Id, "Customer-1", 10.0),
+			headers = mapOf("x-fyke-partition-key" to partition)
+		)
+
+		// Send Order 2 on same partition
+		Fyke.send(
+			type = "OrderCreated",
+			destination = DemoApplication.EXCHANGE_NAME,
+			target = DemoApplication.ROUTING_KEY,
+			businessKey = order2Id,
+			payload = OrderCreatedPayload(order2Id, "Customer-2", 20.0),
+			headers = mapOf("x-fyke-partition-key" to partition)
+		)
+
+		// Wait until Order 1 has attempted and is in backoff
+		await.atMost(Duration.ofSeconds(10)).untilAsserted {
+			val summaries = Fyke.searchByBusinessKey(order1Id).filter { it.source == "INBOX" }
+			assertThat(summaries).isNotEmpty
+			assertThat(summaries.first().attempts).isGreaterThanOrEqualTo(1)
+		}
+
+		// Verify that Order 2 has NOT been processed (partition is locked in STRICT_FIFO)
+		assertThat(orderInboxConsumer.receivedOrders).doesNotContain(order2Id)
+
+		// Fix transient condition
+		orderInboxConsumer.failForOrderId = null
+
+		// Instant unblock / retry
+		val inboxRecord = inboxStore.searchByBusinessKey(order1Id).first()
+		val retried = Fyke.retryInbox(inboxRecord.id)
+		assertThat(retried).isTrue()
+
+		// Both orders must now be received in strict order
+		await.atMost(Duration.ofSeconds(10)).untilAsserted {
+			assertThat(orderInboxConsumer.receivedOrders).contains(order1Id, order2Id)
+			val index1 = orderInboxConsumer.receivedOrders.indexOf(order1Id)
+			val index2 = orderInboxConsumer.receivedOrders.indexOf(order2Id)
+			assertThat(index1).isLessThan(index2)
+		}
+	}
+
+	@Test
+	fun `Scenario 8 - Transactional Inbox fatal poison pill fast-paths directly to DLQ`() {
+		val fatalOrderId = "order-fatal-${UUID.randomUUID()}"
+		orderInboxConsumer.fatalError = true
+
+		orderService.createOrder(fatalOrderId, "BadPayload", 0.0)
+
+		// Wait until captured in DLQ as fatal without wasting retries
+		await.atMost(Duration.ofSeconds(10)).untilAsserted {
+			val summaries = Fyke.searchByBusinessKey(fatalOrderId)
+			assertThat(summaries.any { it.source == "DLQ" && it.reason?.contains("fatal validation failure") == true }).isTrue()
+		}
+
+		val inboxSummary = Fyke.searchByBusinessKey(fatalOrderId).filter { it.source == "INBOX" }
+		assertThat(inboxSummary).isNotEmpty
+		assertThat(inboxSummary.first().status).isEqualTo("DEAD")
+	}
+
+	@Test
+	fun `Scenario 9 - Producer outbox prevents leapfrogging when earlier partition record is in retry backoff`() {
+		val partition = "outbox-part-${UUID.randomUUID()}"
+		val order1Id = "outbox-order-1-${UUID.randomUUID()}"
+		val order2Id = "outbox-order-2-${UUID.randomUUID()}"
+
+		// Record 1 in backoff
+		val record1 = OutboxRecord(
+			id = UUID.randomUUID(),
+			partitionKey = partition,
+			type = "OrderCreated",
+			destination = DemoApplication.EXCHANGE_NAME,
+			target = DemoApplication.ROUTING_KEY,
+			businessKey = order1Id,
+			idempotencyKey = "idem-$order1Id",
+			status = OutboxStatus.NEW,
+			payload = objectMapper.writeValueAsBytes(OrderCreatedPayload(order1Id, "Alice", 10.0)),
+			payloadHash = "hash-1",
+			nextAttemptAt = Instant.now().plusSeconds(60)
+		)
+		outboxStore.save(record1)
+		outboxStore.markRetry(record1.id, 1, Instant.now().plusSeconds(60))
+
+		// Record 2 is new
+		val record2 = OutboxRecord(
+			id = UUID.randomUUID(),
+			partitionKey = partition,
+			type = "OrderCreated",
+			destination = DemoApplication.EXCHANGE_NAME,
+			target = DemoApplication.ROUTING_KEY,
+			businessKey = order2Id,
+			idempotencyKey = "idem-$order2Id",
+			status = OutboxStatus.NEW,
+			payload = objectMapper.writeValueAsBytes(OrderCreatedPayload(order2Id, "Bob", 20.0)),
+			payloadHash = "hash-2",
+			nextAttemptAt = null
+		)
+		outboxStore.save(record2)
+
+		// Claiming batch for this partition must NOT return record 2 (prevent leapfrogging)
+		val claimed = outboxStore.claimBatch(10, Duration.ofSeconds(30), partition)
+		assertThat(claimed).isEmpty()
 	}
 }

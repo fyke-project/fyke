@@ -22,11 +22,25 @@ object Fyke {
 	@Volatile
 	private var store: OutboxStore? = null
 
+	@Volatile
+	private var inboxStore: dev.fyke.core.inbox.InboxStore? = null
+
+	@Volatile
+	private var inboxPoller: dev.fyke.core.inbox.InboxPollerEngine? = null
+
 	@JvmStatic
-	fun initialize(writer: OutboxWriter, poller: PollerEngine, store: OutboxStore) {
+	fun initialize(
+		writer: OutboxWriter,
+		poller: PollerEngine,
+		store: OutboxStore,
+		inboxStore: dev.fyke.core.inbox.InboxStore? = null,
+		inboxPoller: dev.fyke.core.inbox.InboxPollerEngine? = null
+	) {
 		this.writer = writer
 		this.poller = poller
 		this.store = store
+		this.inboxStore = inboxStore
+		this.inboxPoller = inboxPoller
 	}
 
 	/**
@@ -75,11 +89,29 @@ object Fyke {
 	}
 
 	/**
-	 * Searches all outbox and DLQ events associated with a specific business key.
+	 * Immediately resets next_attempt_at for a retrying inbox event, triggering an immediate poll.
+	 *
+	 * @param id The UUID of the inbox record.
+	 * @return true if updated, false otherwise.
+	 */
+	@JvmStatic
+	fun retryInbox(id: UUID): Boolean {
+		val s = inboxStore ?: error("Fyke is not initialized with an InboxStore.")
+		val updated = s.retryNow(id)
+		if (updated) {
+			inboxPoller?.triggerPoll()
+		}
+		return updated
+	}
+
+	/**
+	 * Searches all outbox, inbox, and DLQ events associated with a specific business key.
 	 */
 	@JvmStatic
 	fun searchByBusinessKey(businessKey: String): List<FykeRecordSummary> {
 		val s = store ?: error("Fyke is not initialized.")
-		return s.searchByBusinessKey(businessKey)
+		val outboxAndDlq = s.searchByBusinessKey(businessKey)
+		val inbox = inboxStore?.searchByBusinessKey(businessKey) ?: emptyList()
+		return (outboxAndDlq + inbox).sortedBy { it.timestamp }
 	}
 }

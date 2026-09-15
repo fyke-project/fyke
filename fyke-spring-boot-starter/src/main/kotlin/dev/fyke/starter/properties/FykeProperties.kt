@@ -14,6 +14,8 @@ data class FykeProperties(
 	var liquibase: LiquibaseProperties = LiquibaseProperties(),
 	/** Background poller and dispatch engine properties. */
 	var poller: PollerProperties = PollerProperties(),
+	/** Transactional inbox polling and execution engine properties. */
+	var inbox: InboxProperties = InboxProperties(),
 	/** Housekeeping and retention cleaner properties. */
 	var retention: RetentionProperties = RetentionProperties(),
 	/** Telemetry client-side payload sanitization properties. */
@@ -75,12 +77,36 @@ data class FykeProperties(
 		var enabled: Boolean = true,
 		/** Retention time-to-live for successfully PUBLISHED outbox records before deletion. */
 		var outboxTtl: Duration = Duration.ofDays(7),
+		/** Retention time-to-live for COMPLETED inbox records before deletion. */
+		var inboxTtl: Duration = Duration.ofDays(7),
 		/** Retention time-to-live for REPLAYED dead-letter records before deletion. */
 		var dlqTtl: Duration = Duration.ofDays(30),
 		/** How often the retention cleaner runs. */
 		var purgeInterval: Duration = Duration.ofHours(1),
 		/** Maximum number of records deleted per purge query batch. */
 		var batchSize: Int = 1000
+	)
+
+	/**
+	 * Transactional inbox configuration.
+	 */
+	data class InboxProperties(
+		/** Whether the transactional inbox poller is enabled. */
+		var enabled: Boolean = true,
+		/** Maximum number of records claimed per partition batch. */
+		var batchSize: Int = 50,
+		/** Duration of the inbox lease lock before it expires and becomes reclaimable. */
+		var leaseDuration: Duration = Duration.ofSeconds(30),
+		/** Maximum delivery attempts before moving an inbox message to DLQ. */
+		var maxAttempts: Int = 5,
+		/** Interval for the periodic inbox poller. */
+		var pollInterval: Duration = Duration.ofMillis(500),
+		/** Initial retry backoff duration for failed consumer executions. */
+		var initialBackoff: Duration = Duration.ofMillis(1000),
+		/** Exponential backoff multiplier for retries. */
+		var backoffMultiplier: Double = 1.5,
+		/** Number of concurrent worker threads processing partitions in the inbox poller. */
+		var concurrency: Int = 4
 	)
 
 	/**

@@ -3,7 +3,13 @@ package dev.fyke.starter
 import com.fasterxml.jackson.databind.ObjectMapper
 import dev.fyke.binder.rabbit.FykeRabbitDlqRecoverer
 import dev.fyke.binder.rabbit.RabbitBinder
+import dev.fyke.binder.rabbit.RabbitConsumerRegistrar
 import dev.fyke.core.binder.BrokerBinder
+import dev.fyke.core.inbox.ConsumerPartitionResolver
+import dev.fyke.core.inbox.DefaultConsumerPartitionResolver
+import dev.fyke.core.inbox.InboxPollerEngine
+import dev.fyke.core.inbox.InboxStore
+import dev.fyke.core.inbox.JdbcInboxStore
 import dev.fyke.core.partition.BusinessKeyPartitionResolver
 import dev.fyke.core.partition.PartitionLocker
 import dev.fyke.core.partition.PartitionResolver
@@ -28,6 +34,7 @@ import dev.fyke.starter.properties.FykeProperties
 import io.opentelemetry.api.OpenTelemetry
 import liquibase.integration.spring.SpringLiquibase
 import org.slf4j.LoggerFactory
+import org.springframework.amqp.rabbit.connection.ConnectionFactory
 import org.springframework.amqp.rabbit.core.RabbitTemplate
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
@@ -116,6 +123,21 @@ class FykeAutoConfiguration {
 		objectMapper: ObjectMapper
 	): OutboxStore {
 		return JdbcOutboxStore(dataSource, objectMapper)
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	fun inboxStore(
+		dataSource: DataSource,
+		objectMapper: ObjectMapper
+	): InboxStore {
+		return JdbcInboxStore(dataSource, objectMapper)
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	fun consumerPartitionResolver(objectMapper: ObjectMapper): ConsumerPartitionResolver {
+		return DefaultConsumerPartitionResolver(objectMapper)
 	}
 
 	@Bean
@@ -228,14 +250,63 @@ class FykeAutoConfiguration {
 
 	@Bean
 	@ConditionalOnMissingBean
+	fun inboxPollerEngine(
+		inboxStore: InboxStore,
+		outboxStore: OutboxStore,
+		partitionLocker: PartitionLocker,
+		serializer: FykePayloadSerializer,
+		telemetry: FykeTelemetry,
+		dataSource: DataSource,
+		properties: FykeProperties
+	): InboxPollerEngine {
+		return InboxPollerEngine(
+			inboxStore = inboxStore,
+			outboxStore = outboxStore,
+			partitionLocker = partitionLocker,
+			serializer = serializer,
+			telemetry = telemetry,
+			dataSource = dataSource,
+			batchSize = properties.inbox.batchSize,
+			leaseDuration = properties.inbox.leaseDuration,
+			maxAttempts = properties.inbox.maxAttempts,
+			initialBackoffMs = properties.inbox.initialBackoff.toMillis(),
+			backoffMultiplier = properties.inbox.backoffMultiplier,
+			pollIntervalMs = properties.inbox.pollInterval.toMillis(),
+			concurrency = properties.inbox.concurrency
+		)
+	}
+
+	@Bean
+	@ConditionalOnClass(ConnectionFactory::class)
+	@ConditionalOnBean(ConnectionFactory::class)
+	@ConditionalOnMissingBean
+	fun rabbitConsumerRegistrar(
+		connectionFactory: ConnectionFactory,
+		inboxStore: InboxStore,
+		inboxPollerEngine: InboxPollerEngine,
+		consumerPartitionResolver: ConsumerPartitionResolver
+	): RabbitConsumerRegistrar {
+		return RabbitConsumerRegistrar(
+			connectionFactory = connectionFactory,
+			inboxStore = inboxStore,
+			inboxPollerEngine = inboxPollerEngine,
+			defaultPartitionResolver = consumerPartitionResolver
+		)
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
 	@ConditionalOnProperty(prefix = "fyke.retention", name = ["enabled"], matchIfMissing = true)
 	fun retentionCleaner(
 		outboxStore: OutboxStore,
+		inboxStore: InboxStore,
 		properties: FykeProperties
 	): RetentionCleaner {
 		return RetentionCleaner(
 			outboxStore = outboxStore,
+			inboxStore = inboxStore,
 			outboxTtl = properties.retention.outboxTtl,
+			inboxTtl = properties.retention.inboxTtl,
 			dlqTtl = properties.retention.dlqTtl,
 			purgeInterval = properties.retention.purgeInterval,
 			batchSize = properties.retention.batchSize
@@ -245,18 +316,23 @@ class FykeAutoConfiguration {
 	@Bean
 	fun fykeLifecycle(
 		pollerEngine: PollerEngine,
+		inboxPollerEngine: InboxPollerEngine,
 		retentionCleaner: Optional<RetentionCleaner>,
 		outboxWriter: OutboxWriter,
 		outboxStore: OutboxStore,
+		inboxStore: InboxStore,
 		properties: FykeProperties
 	): SmartLifecycle {
 		return object : SmartLifecycle {
 			private var running = false
 
 			override fun start() {
-				Fyke.initialize(outboxWriter, pollerEngine, outboxStore)
+				Fyke.initialize(outboxWriter, pollerEngine, outboxStore, inboxStore, inboxPollerEngine)
 				if (properties.poller.enabled) {
 					pollerEngine.start()
+				}
+				if (properties.inbox.enabled) {
+					inboxPollerEngine.start()
 				}
 				retentionCleaner.ifPresent { it.start() }
 				running = true
@@ -264,6 +340,7 @@ class FykeAutoConfiguration {
 
 			override fun stop() {
 				retentionCleaner.ifPresent { it.stop() }
+				inboxPollerEngine.stop()
 				pollerEngine.stop()
 				running = false
 			}
