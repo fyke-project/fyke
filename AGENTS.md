@@ -26,6 +26,7 @@ A Spring Boot starter that guarantees domain events actually land in the broker,
 7. **RabbitMQ is the first binder.** The binder is an SPI — core must never reference a concrete broker. Kafka comes *after* the P1 demo is green.
 8. **Same-transaction capture.** The outbox row is written in the *same DB transaction* as the domain data. Non-negotiable — this is the entire point.
 9. **No secrets, no external services** in the repo or its tests (Testcontainers only).
+10. **Inbox/Outbox symmetry.** Always explicitly mirror inbox and outbox naming across channels, threads, metrics, tables, and APIs (e.g. `fyke_outbox_events` vs `fyke_inbox_events`, `fyke-outbox-timer` vs `fyke-inbox-timer`, `replayOutbox` vs `retryInbox`). Never leave outbox implicit by omitting both — naming must be explicit, symmetrical, and unambiguous.
 
 ## Quality bar
 

@@ -185,7 +185,7 @@ class FykeAutoConfiguration {
 
 		val channelMode = properties.outbox.channel
 		if ((channelMode == FykeProperties.PollerChannel.AUTO || channelMode == FykeProperties.PollerChannel.PG_NOTIFY) && isPostgres) {
-			sources.add(PgNotifyChannel(connectionSupplier = { dataSource.connection }, channelName = "fyke_events"))
+			sources.add(PgNotifyChannel(connectionSupplier = { dataSource.connection }, channelName = "fyke_outbox_events"))
 		} else if (!isPostgres) {
 			log.info("Fyke: Non-PostgreSQL database detected. Using TimerChannel fallback interval polling for outbox.")
 		}
@@ -194,7 +194,8 @@ class FykeAutoConfiguration {
 		sources.add(
 			TimerChannel(
 				initialDelayMs = properties.outbox.initialDelay.toMillis(),
-				pollIntervalMs = properties.outbox.pollInterval.toMillis()
+				pollIntervalMs = properties.outbox.pollInterval.toMillis(),
+				name = "fyke-outbox-timer"
 			)
 		)
 
@@ -220,7 +221,8 @@ class FykeAutoConfiguration {
 		sources.add(
 			TimerChannel(
 				initialDelayMs = properties.inbox.initialDelay.toMillis(),
-				pollIntervalMs = properties.inbox.pollInterval.toMillis()
+				pollIntervalMs = properties.inbox.pollInterval.toMillis(),
+				name = "fyke-inbox-timer"
 			)
 		)
 

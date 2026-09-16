@@ -95,9 +95,9 @@ class JdbcOutboxWriter(
 				if (isPostgres) {
 					try {
 						conn.createStatement().use { stmt ->
-							stmt.execute("SELECT pg_notify('fyke_events', '1')")
+							stmt.execute("SELECT pg_notify('fyke_outbox_events', '1')")
 						}
-						log.trace("Fyke: Sent transactional pg_notify('fyke_events') for record id={}", recordId)
+						log.trace("Fyke: Sent transactional pg_notify('fyke_outbox_events') for record id={}", recordId)
 					} catch (e: Exception) {
 						log.debug("Failed to execute transactional pg_notify: {}", e.message)
 					}

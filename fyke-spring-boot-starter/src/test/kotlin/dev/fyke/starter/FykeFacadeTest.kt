@@ -61,6 +61,17 @@ class FykeFacadeTest {
 	}
 
 	@Test
+	fun `Fyke replayOutbox should delegate to OutboxPollerEngine`() {
+		val id = UUID.randomUUID()
+		every { poller.replay(id) } returns true
+
+		val success = Fyke.replayOutbox(id)
+
+		assertThat(success).isTrue()
+		verify(exactly = 1) { poller.replay(id) }
+	}
+
+	@Test
 	fun `Fyke searchByBusinessKey should delegate to OutboxStore`() {
 		val summaries = listOf(
 			FykeRecordSummary(

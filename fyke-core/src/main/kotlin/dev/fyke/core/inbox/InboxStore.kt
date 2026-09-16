@@ -24,6 +24,11 @@ interface InboxStore {
 	fun findById(id: UUID): InboxRecord?
 
 	/**
+	 * Alias for [findById] providing symmetrical naming with [dev.fyke.core.outbox.OutboxStore.findOutboxById].
+	 */
+	fun findInboxById(id: UUID): InboxRecord? = findById(id)
+
+	/**
 	 * Finds all distinct partitions that have pending records ('NEW' or 'PROCESSING' with expired lease).
 	 */
 	fun findPendingPartitions(): List<String>

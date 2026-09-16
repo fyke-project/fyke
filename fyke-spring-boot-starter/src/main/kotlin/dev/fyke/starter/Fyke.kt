@@ -108,6 +108,12 @@ object Fyke {
 	}
 
 	/**
+	 * Symmetrical alias for [replay] to explicitly distinguish outbox replay from inbox retry.
+	 */
+	@JvmStatic
+	fun replayOutbox(id: UUID): Boolean = replay(id)
+
+	/**
 	 * Immediately unblocks a retrying or stuck inbox record and triggers poller execution.
 	 */
 	@JvmStatic

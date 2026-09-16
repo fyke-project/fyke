@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
 
 /**
- * Wakeup trigger source for the outbox poller engine (R2).
+ * Wakeup trigger source for outbox and inbox poller engines (R2).
  */
 interface NotificationSource {
 	fun start(onWakeup: () -> Unit)
@@ -26,7 +26,7 @@ interface NotificationSource {
  */
 class PgNotifyChannel(
 	private val connectionSupplier: () -> Connection,
-	private val channelName: String = "fyke_events"
+	private val channelName: String = "fyke_outbox_events"
 ) : NotificationSource {
 
 	private val log = LoggerFactory.getLogger(javaClass)
@@ -87,7 +87,7 @@ class PgNotifyChannel(
 					} catch (_: Exception) {}
 				}
 			}
-		}, "fyke-pg-listener").apply {
+		}, "fyke-pg-listener-$channelName").apply {
 			isDaemon = true
 			start()
 		}
@@ -109,7 +109,8 @@ class PgNotifyChannel(
  */
 class TimerChannel(
 	private val initialDelayMs: Long = 1000L,
-	private val pollIntervalMs: Long = 1000L
+	private val pollIntervalMs: Long = 1000L,
+	private val name: String = "fyke-timer-poller"
 ) : NotificationSource {
 
 	private val log = LoggerFactory.getLogger(javaClass)
@@ -120,13 +121,13 @@ class TimerChannel(
 		if (!running.compareAndSet(false, true)) return
 
 		val s = Executors.newSingleThreadScheduledExecutor { r ->
-			Thread(r, "fyke-timer-poller").apply { isDaemon = true }
+			Thread(r, name).apply { isDaemon = true }
 		}
 		scheduler = s
-		log.debug("Fyke: TimerChannel started (initialDelay={} ms, pollInterval={} ms)", initialDelayMs, pollIntervalMs)
+		log.debug("Fyke: TimerChannel '{}' started (initialDelay={} ms, pollInterval={} ms)", name, initialDelayMs, pollIntervalMs)
 		s.scheduleWithFixedDelay({
 			if (running.get()) {
-				log.trace("Fyke: TimerChannel tick triggering wakeup")
+				log.trace("Fyke: TimerChannel '{}' tick triggering wakeup", name)
 				onWakeup()
 			}
 		}, initialDelayMs, pollIntervalMs, TimeUnit.MILLISECONDS)
@@ -136,7 +137,7 @@ class TimerChannel(
 		if (running.compareAndSet(true, false)) {
 			scheduler?.shutdownNow()
 			scheduler = null
-			log.debug("Fyke: TimerChannel stopped")
+			log.debug("Fyke: TimerChannel '{}' stopped", name)
 		}
 	}
 }

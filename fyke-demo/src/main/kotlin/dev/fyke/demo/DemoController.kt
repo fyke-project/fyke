@@ -30,6 +30,7 @@ class DemoController(
 	@Transactional
 	fun send(
 		@RequestParam(required = false) tenant: String = "000001",
+		@RequestParam(required = false) orderId: String = UUID.randomUUID().toString(),
 	): OutboxRecord {
 		val id = UUID.randomUUID().toString()
 		return Fyke.send(

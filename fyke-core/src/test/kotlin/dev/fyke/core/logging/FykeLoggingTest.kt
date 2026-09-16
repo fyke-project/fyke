@@ -93,7 +93,7 @@ class FykeLoggingTest {
 			it.contains("Serialized outbox record") && it.contains("payloadSize=")
 		}
 		assertThat(logMessages).anyMatch {
-			it.contains("Sent transactional pg_notify('fyke_events')")
+			it.contains("Sent transactional pg_notify('fyke_outbox_events')")
 		}
 	}
 
