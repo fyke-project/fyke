@@ -62,19 +62,23 @@ class FykeTelemetry(
 	}
 
 	fun recordPublished(durationMs: Long) {
+		log.trace("Fyke: Telemetry counter published +1, latency={} ms", durationMs)
 		publishedCounter.add(1)
 		publishLatencyHistogram.record(durationMs)
 	}
 
 	fun recordPublishFailure() {
+		log.trace("Fyke: Telemetry counter publishFailure +1")
 		publishFailureCounter.add(1)
 	}
 
 	fun recordDlqMessage() {
+		log.trace("Fyke: Telemetry counter dlqGrowth +1")
 		dlqCounter.add(1)
 	}
 
 	fun updateBacklogDepth(depth: Long) {
+		log.trace("Fyke: Telemetry gauge backlogDepth={}", depth)
 		backlogGauge.set(depth)
 	}
 
@@ -90,6 +94,7 @@ class FykeTelemetry(
 		val span = tracer.spanBuilder(spanName).startSpan()
 		val sanitized = sanitizer.sanitizeAttributes(attributes)
 		sanitized.forEach { (k, v) -> span.setAttribute(k, v) }
+		log.trace("Fyke: Recording telemetry span '{}' with {} attribute(s)", spanName, sanitized.size)
 		val scope = span.makeCurrent()
 		return try {
 			block(span)

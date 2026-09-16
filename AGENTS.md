@@ -33,6 +33,15 @@ A Spring Boot starter that guarantees domain events actually land in the broker,
 - Every acceptance criterion in requirements-p1.md has a test that would fail if the behavior regressed.
 - The demo app must prove, in CI: (1) kill JVM mid-transaction → no lost event; (2) broker down → backlog drains after recovery, no duplicates; (3) poison message → DLQ'd, searchable by business key, replayable in-JVM.
 - KDoc on all public API. The README quickstart must work copy-paste.
+- **Logging principles in new code:**
+  - **No sensitive payload leakage:** Never dump raw domain payloads or un-sanitized PII at `DEBUG`/`INFO`. Log identifiers and metadata (`id`, `businessKey`, `type`, `destination`, `partitionKey`, payload size in bytes, hash). `TRACE` may include headers and reflection details.
+  - **Level separation:**
+    - `INFO`: Lifecycle milestones (component started/stopped, listeners registered, retention purged > 0 records, duplicate skipped).
+    - `WARN`: Recoverable anomalies or configuration smells (e.g. event captured without active transaction, retry scheduled, dropped PG connection).
+    - `ERROR`: Unrecoverable errors, exhausted retries, poison pills routed to DLQ.
+    - `DEBUG`: Operational diagnostics (event captured, batch claimed with count and lease duration, dispatch duration, poison pill moving to DLQ, replay/retry requested and outcome, empty retention sweep summary).
+    - `TRACE`: Fine-grained mechanics (partition lock attempts and release, PG LISTEN/Timer ticks, payload serialization metrics, headers, reflection dispatch details, metrics recorded).
+  - **Zero overhead when disabled:** Always use parameterized SLF4J formatting (`{}`) across all log calls.
 
 ## Out of scope — do NOT build (these are later phases)
 

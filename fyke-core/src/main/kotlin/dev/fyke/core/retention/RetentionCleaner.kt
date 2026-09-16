@@ -64,11 +64,13 @@ class RetentionCleaner(
 		var totalInboxPurged = 0
 		var totalDlqPurged = 0
 
+		log.trace("Fyke: Retention cleaner started housekeeping sweep")
 		try {
 			if (outboxRetentionEnabled) {
 				val outboxCutoff = Instant.now().minus(outboxTtl)
 				do {
 					val purged = outboxStore.purgePublished(outboxCutoff, batchSize)
+					log.trace("Fyke: Purged batch of {} published outbox rows", purged)
 					totalOutboxPurged += purged
 				} while (purged == batchSize && running.get())
 			}
@@ -77,6 +79,7 @@ class RetentionCleaner(
 				val inboxCutoff = Instant.now().minus(inboxTtl)
 				do {
 					val purged = inboxStore.purgeCompleted(inboxCutoff, batchSize)
+					log.trace("Fyke: Purged batch of {} completed inbox rows", purged)
 					totalInboxPurged += purged
 				} while (purged == batchSize && running.get())
 			}
@@ -85,6 +88,7 @@ class RetentionCleaner(
 				val dlqCutoff = Instant.now().minus(dlqTtl)
 				do {
 					val purged = outboxStore.purgeDlq(dlqCutoff, batchSize)
+					log.trace("Fyke: Purged batch of {} replayed DLQ rows", purged)
 					totalDlqPurged += purged
 				} while (purged == batchSize && running.get())
 			}
@@ -94,6 +98,8 @@ class RetentionCleaner(
 					"Fyke: Retention cleanup completed: {} published outbox rows purged, {} completed inbox rows purged, {} DLQ rows purged",
 					totalOutboxPurged, totalInboxPurged, totalDlqPurged
 				)
+			} else {
+				log.debug("Fyke: Retention cleanup completed: 0 rows purged (outbox=0, inbox=0, dlq=0)")
 			}
 		} catch (e: Exception) {
 			log.warn("Fyke: Error during retention cleanup run: {}", e.message)

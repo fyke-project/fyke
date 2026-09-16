@@ -8,12 +8,15 @@ import dev.fyke.core.model.OutboxRecord
 import dev.fyke.core.outbox.OutboxPollerEngine
 import dev.fyke.core.outbox.OutboxStore
 import dev.fyke.core.outbox.OutboxWriter
+import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /**
  * Public static facade for interacting with Fyke from application domain code (R1).
  */
 object Fyke {
+
+	private val log = LoggerFactory.getLogger(Fyke::class.java)
 
 	@Volatile
 	private var writer: OutboxWriter? = null
@@ -51,6 +54,18 @@ object Fyke {
 	@JvmStatic
 	fun send(event: OutboxEvent): OutboxRecord {
 		val w = writer ?: error("Fyke is not initialized. Ensure Spring application context has started.")
+		log.debug(
+			"Fyke.send: Dispatching event '{}' for destination '{}' (businessKey='{}')",
+			event.type,
+			event.destination,
+			event.businessKey
+		)
+		log.trace(
+			"Fyke.send: Event details: payloadType={}, target={}, partitionKey={}",
+			event.payload.javaClass.simpleName,
+			event.target,
+			event.partitionKey
+		)
 		return w.write(event)
 	}
 
@@ -88,6 +103,7 @@ object Fyke {
 	@JvmStatic
 	fun replay(id: UUID): Boolean {
 		val p = outboxPoller ?: error("Fyke is not initialized. Ensure Spring application context has started.")
+		log.debug("Fyke.replay: Requesting replay for record id={}", id)
 		return p.replay(id)
 	}
 
@@ -97,6 +113,7 @@ object Fyke {
 	@JvmStatic
 	fun retryInbox(id: UUID): Boolean {
 		val s = inboxStore ?: error("Fyke inbox is not initialized.")
+		log.debug("Fyke.retryInbox: Requesting immediate retry for inbox record id={}", id)
 		val unblocked = s.retryNow(id)
 		if (unblocked) {
 			inboxPoller?.triggerPoll()
@@ -110,6 +127,7 @@ object Fyke {
 	@JvmStatic
 	fun searchByBusinessKey(businessKey: String): List<FykeRecordSummary> {
 		val s = store ?: error("Fyke is not initialized. Ensure Spring application context has started.")
+		log.debug("Fyke.searchByBusinessKey: Searching records for businessKey='{}'", businessKey)
 		val outboxAndDlq = s.searchByBusinessKey(businessKey)
 		val inboxRecords = inboxStore?.searchByBusinessKey(businessKey) ?: emptyList()
 		return (outboxAndDlq + inboxRecords).sortedBy { it.timestamp }

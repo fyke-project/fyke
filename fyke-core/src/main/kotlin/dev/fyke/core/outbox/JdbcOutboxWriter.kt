@@ -71,6 +71,21 @@ class JdbcOutboxWriter(
 				updatedAt = now
 			)
 
+			log.debug(
+				"Fyke: Capturing outbox event '{}' (id={}, businessKey={}, destination={}, partitionKey={})",
+				event.type,
+				recordId,
+				event.businessKey,
+				event.destination,
+				partitionKey
+			)
+			log.trace(
+				"Fyke: Serialized outbox record id={} (payloadSize={} bytes, hash={})",
+				recordId,
+				payloadBytes.size,
+				payloadHash
+			)
+
 			val conn = DataSourceUtils.getConnection(dataSource)
 			try {
 				outboxStore.save(record)
@@ -82,6 +97,7 @@ class JdbcOutboxWriter(
 						conn.createStatement().use { stmt ->
 							stmt.execute("SELECT pg_notify('fyke_events', '1')")
 						}
+						log.trace("Fyke: Sent transactional pg_notify('fyke_events') for record id={}", recordId)
 					} catch (e: Exception) {
 						log.debug("Failed to execute transactional pg_notify: {}", e.message)
 					}
@@ -90,10 +106,13 @@ class JdbcOutboxWriter(
 				if (txActive) {
 					TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
 						override fun afterCommit() {
+							log.trace("Fyke: Executing afterCommit wakeup for record id={}", recordId)
 							onCommitWakeup?.invoke()
 						}
 					})
+					log.trace("Fyke: Registered afterCommit synchronization for record id={}", recordId)
 				} else {
+					log.trace("Fyke: Triggering immediate wakeup for record id={}", recordId)
 					onCommitWakeup?.invoke()
 				}
 			} finally {

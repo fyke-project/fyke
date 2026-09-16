@@ -84,6 +84,7 @@ abstract class AbstractPollerEngine<T : Any>(
 
 	fun triggerPoll() {
 		if (!running.get()) return
+		log.trace("Fyke: Triggering poll for {} (running={}, polling={})", threadPrefix, running.get(), polling.get())
 		executor?.execute {
 			if (polling.compareAndSet(false, true)) {
 				try {
@@ -101,36 +102,41 @@ abstract class AbstractPollerEngine<T : Any>(
 	}
 
 	fun pollOnce(): Int {
+		log.trace("Fyke: {} pollOnce cycle started", threadPrefix)
 		val partitions = findPendingPartitions()
 		if (partitions.isEmpty()) {
+			log.trace("Fyke: {} pollOnce found 0 pending partitions", threadPrefix)
 			onNoPendingPartitions()
 			return 0
 		}
+		log.debug("Fyke: {} pollOnce found {} pending partition(s): {}", threadPrefix, partitions.size, partitions)
 
 		val pool = workerPool
-		return if (pool != null && !pool.isShutdown) {
+		val total = if (pool != null && !pool.isShutdown) {
 			val futures = partitions.map { partition ->
 				pool.submit(Callable { processPartition(partition) })
 			}
-			var total = 0
+			var count = 0
 			for (future in futures) {
 				try {
-					total += future.get(leaseDuration.toMillis(), TimeUnit.MILLISECONDS)
+					count += future.get(leaseDuration.toMillis(), TimeUnit.MILLISECONDS)
 				} catch (e: Exception) {
 					log.warn("Fyke: Error processing partition task: {}", e.message)
 				}
 			}
 			onBatchCompleted()
-			total
+			count
 		} else {
-			var total = 0
+			var count = 0
 			for (partition in partitions) {
 				if (executor != null && !running.get()) break
-				total += processPartition(partition)
+				count += processPartition(partition)
 			}
 			onBatchCompleted()
-			total
+			count
 		}
+		log.trace("Fyke: {} pollOnce finished, total records processed: {}", threadPrefix, total)
+		return total
 	}
 
 	private fun processPartition(partition: String): Int {
@@ -140,23 +146,29 @@ abstract class AbstractPollerEngine<T : Any>(
 			conn = dataSource.connection
 			conn.autoCommit = false
 
+			log.trace("Fyke: {} attempting lock for partition '{}'", threadPrefix, partition)
 			val locked = partitionLocker.tryLock(partition, conn)
 			if (!locked) {
+				log.trace("Fyke: {} partition '{}' is locked by another worker; skipping", threadPrefix, partition)
 				return 0
 			}
 
 			try {
 				val batch = claimBatch(partition)
 				if (batch.isEmpty()) {
+					log.trace("Fyke: {} claimed 0 records for partition '{}'", threadPrefix, partition)
 					return 0
 				}
+				log.debug("Fyke: {} claimed {} record(s) for partition '{}'", threadPrefix, batch.size, partition)
 
 				for (record in batch) {
 					if (executor != null && !running.get()) break
+					log.trace("Fyke: {} processing record in partition '{}'", threadPrefix, partition)
 					processRecord(record)
 					processed++
 				}
 			} finally {
+				log.trace("Fyke: {} releasing lock for partition '{}' (processed={}) and committing", threadPrefix, partition, processed)
 				partitionLocker.unlock(partition, conn)
 				conn.commit()
 			}

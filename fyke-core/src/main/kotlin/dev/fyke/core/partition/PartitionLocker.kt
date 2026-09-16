@@ -33,12 +33,14 @@ class PostgresAdvisoryPartitionLocker : PartitionLocker {
 
 	override fun tryLock(partitionKey: String, connection: Connection): Boolean {
 		return try {
-			connection.prepareStatement("SELECT pg_try_advisory_xact_lock(hashtext(?))").use { stmt ->
+			val acquired = connection.prepareStatement("SELECT pg_try_advisory_xact_lock(hashtext(?))").use { stmt ->
 				stmt.setString(1, partitionKey)
 				stmt.executeQuery().use { rs ->
 					if (rs.next()) rs.getBoolean(1) else false
 				}
 			}
+			log.trace("Fyke: Postgres advisory lock pg_try_advisory_xact_lock for partition '{}' -> {}", partitionKey, acquired)
+			acquired
 		} catch (e: Exception) {
 			log.warn("Failed to acquire advisory lock for partition '{}': {}", partitionKey, e.message)
 			false
@@ -46,7 +48,7 @@ class PostgresAdvisoryPartitionLocker : PartitionLocker {
 	}
 
 	override fun unlock(partitionKey: String, connection: Connection) {
-		// Transaction-scoped advisory locks automatically release on tx commit/rollback.
+		log.trace("Fyke: Postgres advisory lock for partition '{}' will auto-release on transaction completion", partitionKey)
 	}
 }
 
@@ -54,14 +56,18 @@ class PostgresAdvisoryPartitionLocker : PartitionLocker {
  * In-JVM fallback partition locker using ReentrantLocks for local testing (e.g. H2) or non-PostgreSQL databases.
  */
 class SingleWorkerPartitionLocker : PartitionLocker {
+	private val log = LoggerFactory.getLogger(javaClass)
 	private val locks = ConcurrentHashMap<String, ReentrantLock>()
 
 	override fun tryLock(partitionKey: String, connection: Connection): Boolean {
 		val lock = locks.computeIfAbsent(partitionKey) { ReentrantLock() }
-		return lock.tryLock()
+		val acquired = lock.tryLock()
+		log.trace("Fyke: SingleWorkerPartitionLocker.tryLock for partition '{}' -> {}", partitionKey, acquired)
+		return acquired
 	}
 
 	override fun unlock(partitionKey: String, connection: Connection) {
+		log.trace("Fyke: SingleWorkerPartitionLocker.unlock for partition '{}'", partitionKey)
 		locks[partitionKey]?.let { lock ->
 			if (lock.isHeldByCurrentThread) {
 				lock.unlock()

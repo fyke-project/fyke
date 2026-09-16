@@ -25,5 +25,5 @@ dependencies {
 	testImplementation("io.opentelemetry:opentelemetry-sdk")
 	testImplementation("io.opentelemetry:opentelemetry-sdk-testing")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-	testRuntimeOnly("ch.qos.logback:logback-classic:1.5.16")
+	testImplementation("ch.qos.logback:logback-classic:1.5.16")
 }

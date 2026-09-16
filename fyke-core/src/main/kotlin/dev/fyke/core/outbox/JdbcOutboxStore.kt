@@ -102,10 +102,26 @@ class JdbcOutboxStore(
 				ps.setTimestamp(19, record.nextAttemptAt?.let { Timestamp.from(it) })
 				ps
 			}
+			log.debug(
+				"Fyke: Saved outbox record id={} (type={}, businessKey={}, destination={}, partitionKey={})",
+				record.id,
+				record.type,
+				record.businessKey,
+				record.destination,
+				record.partitionKey
+			)
+			log.trace(
+				"Fyke: Outbox record id={} stored with status={}, size={} bytes",
+				record.id,
+				record.status,
+				record.size
+			)
 		} catch (e: DuplicateKeyException) {
+			log.debug("Fyke: Duplicate idempotencyKey '{}' detected for outbox record id={}", record.idempotencyKey, record.id)
 			throw DuplicateIdempotencyKeyException(record.idempotencyKey)
 		} catch (e: Exception) {
 			if (e.message?.contains("idempotency_key", ignoreCase = true) == true) {
+				log.debug("Fyke: Duplicate idempotencyKey '{}' detected for outbox record id={}", record.idempotencyKey, record.id)
 				throw DuplicateIdempotencyKeyException(record.idempotencyKey)
 			}
 			throw e
@@ -114,12 +130,16 @@ class JdbcOutboxStore(
 
 	override fun findOutboxById(id: UUID): OutboxRecord? {
 		val sql = "SELECT * FROM fyke_outbox WHERE id = ?"
-		return jdbcTemplate.query(sql, outboxRowMapper, id).firstOrNull()
+		val record = jdbcTemplate.query(sql, outboxRowMapper, id).firstOrNull()
+		log.trace("Fyke: findOutboxById({}) -> {}", id, if (record != null) "found" else "not found")
+		return record
 	}
 
 	override fun findPendingPartitions(): List<String> {
 		val sql = "SELECT DISTINCT partition_key FROM fyke_outbox WHERE status IN ('NEW', 'DISPATCHING')"
-		return jdbcTemplate.query(sql) { rs, _ -> rs.getString("partition_key") }
+		val partitions = jdbcTemplate.query(sql) { rs, _ -> rs.getString("partition_key") }
+		log.trace("Fyke: Discovered pending outbox partition(s): {}", partitions)
+		return partitions
 	}
 
 	override fun claimBatch(batchSize: Int, leaseDuration: Duration, partitionKey: String): List<OutboxRecord> {
@@ -149,7 +169,10 @@ class JdbcOutboxStore(
 			partitionKey,
 			Timestamp.from(now), Timestamp.from(now), batchSize
 		)
-		if (claimed.isEmpty()) return emptyList()
+		if (claimed.isEmpty()) {
+			log.trace("Fyke: No outbox records claimed for partition '{}'", partitionKey)
+			return emptyList()
+		}
 
 		val updateSql = """
 			UPDATE fyke_outbox
@@ -161,18 +184,27 @@ class JdbcOutboxStore(
 			arrayOf(Timestamp.from(leaseExpiresAt), Timestamp.from(now), record.id)
 		})
 
+		log.debug(
+			"Fyke: Claimed batch of {} outbox record(s) for partition '{}' (lease until {})",
+			claimed.size,
+			partitionKey,
+			leaseExpiresAt
+		)
+
 		return claimed.map { it.copy(status = OutboxStatus.DISPATCHING, leaseExpiresAt = leaseExpiresAt) }
 	}
 
 	override fun markPublished(id: UUID, publishedAt: Instant) {
 		val sql = "UPDATE fyke_outbox SET status = 'PUBLISHED', published_at = ?, updated_at = ? WHERE id = ?"
 		jdbcTemplate.update(sql, Timestamp.from(publishedAt), Timestamp.from(Instant.now()), id)
+		log.debug("Fyke: Marked outbox record id={} as PUBLISHED at {}", id, publishedAt)
 	}
 
 	override fun markRetry(id: UUID, attempts: Int, nextAttemptAt: Instant) {
 		val sql =
 			"UPDATE fyke_outbox SET status = 'NEW', attempts = ?, next_attempt_at = ?, updated_at = ? WHERE id = ?"
 		jdbcTemplate.update(sql, attempts, Timestamp.from(nextAttemptAt), Timestamp.from(Instant.now()), id)
+		log.debug("Fyke: Scheduled retry for outbox record id={} (attempts={}, nextAttemptAt={})", id, attempts, nextAttemptAt)
 	}
 
 	override fun markDead(id: UUID, reason: String) {
@@ -181,6 +213,7 @@ class JdbcOutboxStore(
 
 		val updateSql = "UPDATE fyke_outbox SET status = 'DEAD', updated_at = ? WHERE id = ?"
 		jdbcTemplate.update(updateSql, Timestamp.from(now), id)
+		log.debug("Fyke: Marked outbox record id={} as DEAD (reason: {})", id, reason)
 
 		val dlq = DlqRecord(
 			source = DlqSource.OUTBOX,
@@ -226,19 +259,32 @@ class JdbcOutboxStore(
 			ps.setTimestamp(14, Timestamp.from(dlq.receivedAt))
 			ps
 		}
+		log.debug(
+			"Fyke: Saved DLQ record id={} (source={}, outboxId={}, businessKey={}, destination={})",
+			dlq.id,
+			dlq.source,
+			dlq.outboxId,
+			dlq.businessKey,
+			dlq.destination
+		)
+		log.trace("Fyke: DLQ record id={} reason: {}", dlq.id, dlq.reason)
 	}
 
 	override fun findDlqById(id: UUID): DlqRecord? {
 		val sql = "SELECT * FROM fyke_dlq WHERE id = ?"
-		return jdbcTemplate.query(sql, dlqRowMapper, id).firstOrNull()
+		val dlq = jdbcTemplate.query(sql, dlqRowMapper, id).firstOrNull()
+		log.trace("Fyke: findDlqById({}) -> {}", id, if (dlq != null) "found" else "not found")
+		return dlq
 	}
 
 	override fun markDlqReplayed(id: UUID, replayedAt: Instant) {
 		val sql = "UPDATE fyke_dlq SET replayed_at = ? WHERE id = ?"
 		jdbcTemplate.update(sql, Timestamp.from(replayedAt), id)
+		log.debug("Fyke: Marked DLQ record id={} as replayed at {}", id, replayedAt)
 	}
 
 	override fun searchByBusinessKey(businessKey: String): List<FykeRecordSummary> {
+		log.debug("Fyke: Searching outbox and DLQ records for businessKey='{}'", businessKey)
 		val sql = """
 			SELECT id, 'OUTBOX' AS source, type, business_key, status, destination, target, created_at AS timestamp, attempts, NULL AS reason
 			FROM fyke_outbox WHERE business_key = ?
@@ -248,7 +294,7 @@ class JdbcOutboxStore(
 			ORDER BY timestamp ASC
 		""".trimIndent()
 
-		return jdbcTemplate.query(sql, { rs, _ ->
+		val results = jdbcTemplate.query(sql, { rs, _ ->
 			FykeRecordSummary(
 				id = UUID.fromString(rs.getString("id")),
 				source = rs.getString("source"),
@@ -262,6 +308,8 @@ class JdbcOutboxStore(
 				reason = rs.getString("reason")
 			)
 		}, businessKey, businessKey)
+		log.trace("Fyke: Found {} outbox/DLQ records for businessKey='{}'", results.size, businessKey)
+		return results
 	}
 
 	override fun purgePublished(cutoff: Instant, batchSize: Int): Int {
@@ -273,7 +321,9 @@ class JdbcOutboxStore(
 				LIMIT ?
 			)
 		""".trimIndent()
-		return jdbcTemplate.update(sql, Timestamp.from(cutoff), batchSize)
+		val count = jdbcTemplate.update(sql, Timestamp.from(cutoff), batchSize)
+		log.debug("Fyke: Purged {} published outbox records older than {}", count, cutoff)
+		return count
 	}
 
 	override fun purgeDlq(cutoff: Instant, batchSize: Int): Int {
@@ -285,12 +335,16 @@ class JdbcOutboxStore(
 				LIMIT ?
 			)
 		""".trimIndent()
-		return jdbcTemplate.update(sql, Timestamp.from(cutoff), batchSize)
+		val count = jdbcTemplate.update(sql, Timestamp.from(cutoff), batchSize)
+		log.debug("Fyke: Purged {} replayed DLQ records older than {}", count, cutoff)
+		return count
 	}
 
 	override fun countPending(): Long {
 		val sql = "SELECT COUNT(*) FROM fyke_outbox WHERE status IN ('NEW', 'DISPATCHING')"
-		return jdbcTemplate.queryForObject(sql, Long::class.java) ?: 0L
+		val count = jdbcTemplate.queryForObject(sql, Long::class.java) ?: 0L
+		log.trace("Fyke: Pending outbox count: {}", count)
+		return count
 	}
 
 	private fun setJsonOrString(ps: java.sql.PreparedStatement, index: Int, json: String?, conn: java.sql.Connection) {

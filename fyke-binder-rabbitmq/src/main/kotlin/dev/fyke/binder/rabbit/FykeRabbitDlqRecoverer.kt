@@ -35,6 +35,14 @@ class FykeRabbitDlqRecoverer(
 			?: properties.receivedRoutingKey
 			?: "amqp.message"
 
+		log.debug(
+			"Fyke: Recovering poison message from queue '{}' (businessKey={}, type={})",
+			properties.consumerQueue,
+			businessKey,
+			type
+		)
+		log.trace("Fyke: Poison message headers: {}", headers)
+
 		val partitionKey = headers["x-fyke-partition-key"] ?: "default"
 		val destination = properties.receivedExchange?.takeIf { it.isNotBlank() } ?: "default.exchange"
 		val target = properties.receivedRoutingKey

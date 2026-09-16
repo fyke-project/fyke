@@ -48,11 +48,21 @@ class RabbitBinder(
 		val routingKey = record.target ?: record.type
 
 		val correlationData = CorrelationData(record.id.toString())
+		log.debug(
+			"Fyke: Publishing record id={} (type={}, businessKey={}) to RabbitMQ exchange '{}' with routingKey '{}'",
+			record.id,
+			record.type,
+			record.businessKey,
+			exchange,
+			routingKey
+		)
+		log.trace("Fyke: RabbitMQ message headers for record id={}: {}", record.id, properties.headers)
 
 		return try {
 			rabbitTemplate.send(exchange, routingKey, message, correlationData)
 			val confirm = correlationData.future.get(confirmTimeoutMs, TimeUnit.MILLISECONDS)
 			if (confirm != null && confirm.ack) {
+				log.trace("Fyke: Received publisher confirm ACK for record id={}", record.id)
 				PublishResult.Success
 			} else {
 				val reason = confirm?.reason() ?: "NACK received without reason"
@@ -73,12 +83,14 @@ class RabbitBinder(
 	}
 
 	override fun isHealthy(): Boolean {
-		return try {
+		val healthy = try {
 			rabbitTemplate.connectionFactory.createConnection().use { conn ->
 				conn.isOpen
 			}
 		} catch (_: Exception) {
 			false
 		}
+		log.trace("Fyke: RabbitMQ isHealthy check returned {}", healthy)
+		return healthy
 	}
 }

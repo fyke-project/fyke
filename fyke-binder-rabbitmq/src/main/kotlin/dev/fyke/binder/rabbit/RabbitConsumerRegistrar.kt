@@ -41,6 +41,7 @@ class RabbitConsumerRegistrar(
 	}
 
 	override fun afterSingletonsInstantiated() {
+		log.debug("Fyke: Scanning beans for @FykeListener annotations")
 		val beanNames = applicationContext.beanDefinitionNames
 		for (beanName in beanNames) {
 			val bean = try {
@@ -107,10 +108,23 @@ class RabbitConsumerRegistrar(
 
 						val messageId = properties.messageId ?: properties.correlationId
 
+						log.debug(
+							"Fyke: Received RabbitMQ message on queue '{}' (deliveryTag={}, messageId={})",
+							destination,
+							properties.deliveryTag,
+							messageId
+						)
+
 						val partitionKey = resolver.resolve(
 							headers = headers,
 							payloadBytes = message.body,
 							partitionKeyProperty = annotation.partitionKeyProperty.ifBlank { null }
+						)
+						log.trace(
+							"Fyke: Resolved partition '{}' for RabbitMQ message (businessKey={}, type={})",
+							partitionKey,
+							businessKey,
+							type
 						)
 
 						val inboxRecord = InboxRecord(
@@ -131,6 +145,7 @@ class RabbitConsumerRegistrar(
 
 						val saved = inboxStore.save(inboxRecord)
 						channel?.basicAck(properties.deliveryTag, false)
+						log.trace("Fyke: Acknowledged RabbitMQ deliveryTag={} (saved={})", properties.deliveryTag, saved)
 						if (saved) {
 							inboxPollerEngine.triggerPoll()
 						}

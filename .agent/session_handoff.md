@@ -91,11 +91,16 @@ Updated `docs/requirements-p1.md`, `docs/architecture.md`, and `docs/decisions.m
    - **Symmetrical Packages**: `dev.fyke.core.outbox` (`OutboxStore`, `JdbcOutboxStore`, `OutboxWriter`, `JdbcOutboxWriter`, `OutboxPollerEngine`) and `dev.fyke.core.inbox` (`InboxStore`, `JdbcInboxStore`, `InboxPollerEngine`, `FykeListener`, `ConsumerPartitionResolver`).
    - **Symmetrical Configuration**: Restructured `FykeProperties` to `fyke.outbox.*` and `fyke.inbox.*` with modular nested `retention: RetentionConfig(enabled, ttl)` (outbox default 7d, inbox default 14d, dlq default 30d) and global cleaner daemon schedule in `fyke.retention`.
 
+8. **Structured Debug & Trace Logging Pipeline**:
+   - **Logging Principles**: Codified in `AGENTS.md` (no sensitive payload leakage, clear level separation, zero overhead with parameterized SLF4J formatting).
+   - **Granular Visibility**: Added `DEBUG` operational diagnostics (event capture, batch claims with lease duration, dispatch timing, replays, retries, DLQ routing, purge summaries) and `TRACE` mechanics (advisory locks, notifications, payload serialization metrics, headers, reflection dispatch details).
+   - **Verification**: Tested with `FykeLoggingTest` verifying log emission and formatting without regressions.
+
 ---
 
 ## 3. Current Status & Git History
 
-All tasks for **P1** and Inbox enhancements are 100% complete, verified, and committed.
+All tasks for **P1**, Inbox enhancements, and Logging pipeline are 100% complete, verified, and committed.
 
 ### Git Log
 ```text

@@ -359,6 +359,12 @@ class FykeAutoConfiguration {
 			private var running = false
 
 			override fun start() {
+				log.debug(
+					"Fyke: SmartLifecycle starting (outboxEnabled={}, inboxEnabled={}, retentionEnabled={})",
+					properties.outbox.enabled,
+					properties.inbox.enabled,
+					properties.retention.enabled
+				)
 				Fyke.initialize(outboxWriter, outboxPollerEngine, outboxStore, inboxStore, inboxPollerEngine)
 				if (properties.outbox.enabled) {
 					outboxPollerEngine.start()
@@ -371,6 +377,7 @@ class FykeAutoConfiguration {
 			}
 
 			override fun stop() {
+				log.debug("Fyke: SmartLifecycle stopping components")
 				retentionCleaner.ifPresent { it.stop() }
 				inboxPollerEngine.stop()
 				outboxPollerEngine.stop()
@@ -400,6 +407,8 @@ class FykeAutoConfiguration {
 class FykeEventDispatcher(
 	private val outboxWriterProvider: ObjectProvider<OutboxWriter>
 ) {
+	private val log = LoggerFactory.getLogger(javaClass)
+
 	@EventListener
 	fun handleFykeEvent(event: Any) {
 		val annotation = event.javaClass.getAnnotation(FykeEvent::class.java) ?: return
@@ -416,6 +425,9 @@ class FykeEventDispatcher(
 		} catch (_: Exception) {
 			event.toString()
 		}
+
+		log.debug("Fyke: Intercepted @FykeEvent on {} for destination '{}'", event.javaClass.simpleName, destination)
+		log.trace("Fyke: @FykeEvent details: type={}, target={}, businessKey={}", type, target, businessKeyValue)
 
 		outboxWriter.write(
 			dev.fyke.core.model.OutboxEvent(

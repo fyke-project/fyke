@@ -59,6 +59,11 @@ class PgNotifyChannel(
 						// getNotifications blocks for timeoutMs; 0 means non-blocking
 						val notifications = pgConn.getNotifications(1000)
 						if (notifications != null && notifications.isNotEmpty()) {
+							log.debug(
+								"Fyke: Received {} notification(s) on Postgres channel '{}', triggering wakeup",
+								notifications.size,
+								channelName
+							)
 							onWakeup()
 						}
 					}
@@ -107,6 +112,7 @@ class TimerChannel(
 	private val pollIntervalMs: Long = 1000L
 ) : NotificationSource {
 
+	private val log = LoggerFactory.getLogger(javaClass)
 	private val running = AtomicBoolean(false)
 	private var scheduler: ScheduledExecutorService? = null
 
@@ -117,8 +123,10 @@ class TimerChannel(
 			Thread(r, "fyke-timer-poller").apply { isDaemon = true }
 		}
 		scheduler = s
+		log.debug("Fyke: TimerChannel started (initialDelay={} ms, pollInterval={} ms)", initialDelayMs, pollIntervalMs)
 		s.scheduleWithFixedDelay({
 			if (running.get()) {
+				log.trace("Fyke: TimerChannel tick triggering wakeup")
 				onWakeup()
 			}
 		}, initialDelayMs, pollIntervalMs, TimeUnit.MILLISECONDS)
@@ -128,6 +136,7 @@ class TimerChannel(
 		if (running.compareAndSet(true, false)) {
 			scheduler?.shutdownNow()
 			scheduler = null
+			log.debug("Fyke: TimerChannel stopped")
 		}
 	}
 }

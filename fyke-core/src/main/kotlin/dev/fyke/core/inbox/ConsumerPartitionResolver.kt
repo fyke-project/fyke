@@ -1,6 +1,7 @@
 package dev.fyke.core.inbox
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.slf4j.LoggerFactory
 
 /**
  * Strategy interface for resolving a partition key on consumed messages.
@@ -27,6 +28,8 @@ class DefaultConsumerPartitionResolver(
 	private val objectMapper: ObjectMapper = ObjectMapper()
 ) : ConsumerPartitionResolver {
 
+	private val log = LoggerFactory.getLogger(javaClass)
+
 	override fun resolve(
 		headers: Map<String, String>,
 		payloadBytes: ByteArray,
@@ -38,6 +41,7 @@ class DefaultConsumerPartitionResolver(
 				val node = objectMapper.readTree(payloadBytes)
 				val propValue = node.path(partitionKeyProperty).asText()
 				if (!propValue.isNullOrBlank()) {
+					log.trace("Fyke: Resolved consumer partition '{}' from property '{}'", propValue, partitionKeyProperty)
 					return propValue
 				}
 			} catch (_: Exception) {
@@ -53,10 +57,12 @@ class DefaultConsumerPartitionResolver(
 			?: headers["correlation_id"]
 
 		if (!headerKey.isNullOrBlank()) {
+			log.trace("Fyke: Resolved consumer partition '{}' from header", headerKey)
 			return headerKey
 		}
 
 		// Tier 3: Default partition
+		log.trace("Fyke: Resolved consumer default partition 'default'")
 		return "default"
 	}
 }

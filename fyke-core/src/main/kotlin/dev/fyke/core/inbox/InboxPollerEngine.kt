@@ -95,6 +95,14 @@ class InboxPollerEngine(
 			return
 		}
 
+		log.trace(
+			"Fyke: Processing inbox record id={} (destination={}, partitionKey={}, consumer={})",
+			record.id,
+			record.destination,
+			record.partitionKey,
+			record.consumer
+		)
+
 		for (registration in destinationListeners) {
 			val startTime = System.currentTimeMillis()
 
@@ -116,6 +124,12 @@ class InboxPollerEngine(
 
 			// Step 2: Method invocation
 			try {
+				log.trace(
+					"Fyke: Invoking listener {}.{}() for inbox record id={}",
+					registration.bean.javaClass.simpleName,
+					registration.method.name,
+					record.id
+				)
 				if (registration.method.parameterCount == 0) {
 					registration.method.invoke(registration.bean)
 				} else {
@@ -132,6 +146,7 @@ class InboxPollerEngine(
 	}
 
 	private fun deserializePayload(payload: ByteArray, targetType: Class<*>): Any? {
+		log.trace("Fyke: Deserializing {} payload bytes for target type {}", payload.size, targetType.simpleName)
 		return when {
 			targetType == ByteArray::class.java -> payload
 			targetType == String::class.java -> String(payload, Charsets.UTF_8)
@@ -175,6 +190,7 @@ class InboxPollerEngine(
 
 	private fun saveToDlq(record: InboxRecord, cause: Throwable) {
 		val stackTrace = cause.stackTraceToString().take(4000)
+		log.debug("Fyke: Moving poison inbox record id={} to DLQ (cause={})", record.id, cause.message)
 		val dlqRecord = DlqRecord(
 			id = UUID.randomUUID(),
 			source = DlqSource.CONSUMER,

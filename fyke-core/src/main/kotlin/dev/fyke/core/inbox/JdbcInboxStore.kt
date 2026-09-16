@@ -92,6 +92,21 @@ class JdbcInboxStore(
 			ps
 		}
 		if (count > 0) {
+			log.debug(
+				"Fyke: Ingested inbox record id={} (messageId={}, businessKey={}, destination={}, partitionKey={}, ordering={})",
+				record.id,
+				record.messageId,
+				record.businessKey,
+				record.destination,
+				record.partitionKey,
+				record.ordering
+			)
+			log.trace(
+				"Fyke: Ingested inbox record id={} payload size={} bytes, consumer={}",
+				record.id,
+				record.payload.size,
+				record.consumer
+			)
 			notifyPostgres()
 		}
 		return count > 0
@@ -99,12 +114,16 @@ class JdbcInboxStore(
 
 	override fun findById(id: UUID): InboxRecord? {
 		val sql = "SELECT * FROM fyke_inbox WHERE id = ?"
-		return jdbcTemplate.query(sql, inboxRowMapper, id).firstOrNull()
+		val record = jdbcTemplate.query(sql, inboxRowMapper, id).firstOrNull()
+		log.trace("Fyke: findById({}) in inbox -> {}", id, if (record != null) "found" else "not found")
+		return record
 	}
 
 	override fun findPendingPartitions(): List<String> {
 		val sql = "SELECT DISTINCT partition_key FROM fyke_inbox WHERE status IN ('NEW', 'PROCESSING')"
-		return jdbcTemplate.query(sql) { rs, _ -> rs.getString("partition_key") }
+		val partitions = jdbcTemplate.query(sql) { rs, _ -> rs.getString("partition_key") }
+		log.trace("Fyke: Discovered pending inbox partition(s): {}", partitions)
+		return partitions
 	}
 
 	override fun claimBatch(batchSize: Int, leaseDuration: Duration, partitionKey: String): List<InboxRecord> {
@@ -139,7 +158,10 @@ class JdbcInboxStore(
 			Timestamp.from(now),
 			batchSize
 		)
-		if (claimed.isEmpty()) return emptyList()
+		if (claimed.isEmpty()) {
+			log.trace("Fyke: No inbox records claimed for partition '{}'", partitionKey)
+			return emptyList()
+		}
 
 		val updateSql = """
 			UPDATE fyke_inbox
@@ -151,28 +173,39 @@ class JdbcInboxStore(
 			arrayOf(Timestamp.from(leaseExpiresAt), Timestamp.from(now), record.id)
 		})
 
+		log.debug(
+			"Fyke: Claimed batch of {} inbox record(s) for partition '{}' (lease until {})",
+			claimed.size,
+			partitionKey,
+			leaseExpiresAt
+		)
+
 		return claimed.map { it.copy(status = InboxStatus.PROCESSING, leaseExpiresAt = leaseExpiresAt) }
 	}
 
 	override fun markCompleted(id: UUID, completedAt: Instant) {
 		val sql = "UPDATE fyke_inbox SET status = 'COMPLETED', completed_at = ?, updated_at = ? WHERE id = ?"
 		jdbcTemplate.update(sql, Timestamp.from(completedAt), Timestamp.from(Instant.now()), id)
+		log.debug("Fyke: Marked inbox record id={} as COMPLETED at {}", id, completedAt)
 	}
 
 	override fun markRetry(id: UUID, attempts: Int, nextAttemptAt: Instant) {
 		val sql = "UPDATE fyke_inbox SET status = 'NEW', attempts = ?, next_attempt_at = ?, updated_at = ? WHERE id = ?"
 		jdbcTemplate.update(sql, attempts, Timestamp.from(nextAttemptAt), Timestamp.from(Instant.now()), id)
+		log.debug("Fyke: Scheduled retry for inbox record id={} (attempts={}, nextAttemptAt={})", id, attempts, nextAttemptAt)
 	}
 
 	override fun markDead(id: UUID) {
 		val sql = "UPDATE fyke_inbox SET status = 'DEAD', updated_at = ? WHERE id = ?"
 		jdbcTemplate.update(sql, Timestamp.from(Instant.now()), id)
+		log.debug("Fyke: Marked inbox record id={} as DEAD", id)
 	}
 
 	override fun retryNow(id: UUID): Boolean {
 		val now = Instant.now()
 		val sql = "UPDATE fyke_inbox SET status = 'NEW', next_attempt_at = ?, updated_at = ? WHERE id = ? AND status IN ('NEW', 'PROCESSING')"
 		val updated = jdbcTemplate.update(sql, Timestamp.from(now), Timestamp.from(now), id) > 0
+		log.debug("Fyke: Forcing immediate retry for inbox record id={} (updated={})", id, updated)
 		if (updated) {
 			notifyPostgres()
 		}
@@ -180,6 +213,7 @@ class JdbcInboxStore(
 	}
 
 	override fun searchByBusinessKey(businessKey: String): List<FykeRecordSummary> {
+		log.debug("Fyke: Searching inbox records for businessKey='{}'", businessKey)
 		val sql = """
 			SELECT id, 'INBOX' as source, type, business_key, status, destination, target, created_at as timestamp, attempts, null as reason
 			FROM fyke_inbox
@@ -187,7 +221,7 @@ class JdbcInboxStore(
 			ORDER BY timestamp ASC
 		""".trimIndent()
 
-		return jdbcTemplate.query(sql, { rs, _ ->
+		val results = jdbcTemplate.query(sql, { rs, _ ->
 			FykeRecordSummary(
 				id = UUID.fromString(rs.getString("id")),
 				source = rs.getString("source"),
@@ -201,6 +235,8 @@ class JdbcInboxStore(
 				reason = rs.getString("reason")
 			)
 		}, businessKey)
+		log.trace("Fyke: Found {} inbox records for businessKey='{}'", results.size, businessKey)
+		return results
 	}
 
 	override fun purgeCompleted(cutoff: Instant, batchSize: Int): Int {
@@ -212,12 +248,16 @@ class JdbcInboxStore(
 				LIMIT ?
 			)
 		""".trimIndent()
-		return jdbcTemplate.update(sql, Timestamp.from(cutoff), batchSize)
+		val count = jdbcTemplate.update(sql, Timestamp.from(cutoff), batchSize)
+		log.debug("Fyke: Purged {} completed inbox records older than {}", count, cutoff)
+		return count
 	}
 
 	override fun countPending(): Long {
 		val sql = "SELECT COUNT(*) FROM fyke_inbox WHERE status IN ('NEW', 'PROCESSING')"
-		return jdbcTemplate.queryForObject(sql, Long::class.java) ?: 0L
+		val count = jdbcTemplate.queryForObject(sql, Long::class.java) ?: 0L
+		log.trace("Fyke: Pending inbox count: {}", count)
+		return count
 	}
 
 	private fun setJsonOrString(ps: java.sql.PreparedStatement, index: Int, json: String?, conn: java.sql.Connection) {
@@ -255,6 +295,7 @@ class JdbcInboxStore(
 					conn.createStatement().use { stmt ->
 						stmt.execute("SELECT pg_notify('fyke_inbox_events', '1')")
 					}
+					log.trace("Fyke: Sent transactional pg_notify('fyke_inbox_events')")
 				}
 			} finally {
 				DataSourceUtils.releaseConnection(conn, dataSource)

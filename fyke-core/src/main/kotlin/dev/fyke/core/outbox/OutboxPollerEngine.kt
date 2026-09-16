@@ -55,15 +55,24 @@ class OutboxPollerEngine(
 	}
 
 	override fun onNoPendingPartitions() {
+		log.trace("Fyke: Outbox poller found no pending partitions; backlog depth set to 0")
 		telemetry.updateBacklogDepth(0)
 	}
 
 	override fun onBatchCompleted() {
 		val pending = outboxStore.countPending()
+		log.trace("Fyke: Outbox poller batch sweep completed; backlog depth={}", pending)
 		telemetry.updateBacklogDepth(pending)
 	}
 
 	override fun processRecord(record: OutboxRecord) {
+		log.trace(
+			"Fyke: Dispatching outbox record id={} (attempt={}, partitionKey={}, destination={})",
+			record.id,
+			record.attempts,
+			record.partitionKey,
+			record.destination
+		)
 		val startTime = System.currentTimeMillis()
 		val result = try {
 			brokerBinder.publish(record)
@@ -71,6 +80,7 @@ class OutboxPollerEngine(
 			PublishResult.TransientFailure(e)
 		}
 		val durationMs = System.currentTimeMillis() - startTime
+		log.trace("Fyke: Binder result for outbox record id={}: {} (took {} ms)", record.id, result, durationMs)
 		when (result) {
 			is PublishResult.Success -> {
 				outboxStore.markPublished(record.id, Instant.now())
@@ -108,9 +118,11 @@ class OutboxPollerEngine(
 	}
 
 	fun replay(id: UUID): Boolean {
+		log.debug("Fyke: Replay requested for record id={}", id)
 		// First check DLQ
 		val dlq = outboxStore.findDlqById(id)
 		if (dlq != null) {
+			log.trace("Fyke: Found record id={} in DLQ, publishing to {}", id, dlq.destination)
 			val record = OutboxRecord(
 				id = dlq.id,
 				partitionKey = dlq.partitionKey,
@@ -131,18 +143,21 @@ class OutboxPollerEngine(
 				log.info("Fyke: Replayed DLQ record {} to {}", id, dlq.destination)
 				return true
 			}
+			log.warn("Fyke: Failed to replay DLQ record id={}: {}", id, result)
 			return false
 		}
 
 		// Check Outbox
 		val outbox = outboxStore.findOutboxById(id)
 		if (outbox != null) {
+			log.trace("Fyke: Found record id={} in Outbox, publishing to {}", id, outbox.destination)
 			val result = brokerBinder.publish(outbox)
 			if (result is PublishResult.Success) {
 				outboxStore.markPublished(id, Instant.now())
 				log.info("Fyke: Replayed outbox record {} to {}", id, outbox.destination)
 				return true
 			}
+			log.warn("Fyke: Failed to replay outbox record id={}: {}", id, result)
 			return false
 		}
 
