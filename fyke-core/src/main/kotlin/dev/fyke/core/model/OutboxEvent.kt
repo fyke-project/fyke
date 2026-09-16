@@ -14,7 +14,6 @@ import java.util.UUID
  * @property partitionKey Optional partition key. If null, resolved via the configured PartitionResolver.
  * @property headers Optional broker headers or metadata.
  * @property correlationId Optional tracing correlation ID.
- * @property traceId Optional OpenTelemetry trace ID.
  */
 data class OutboxEvent(
 	val type: String,
@@ -25,6 +24,5 @@ data class OutboxEvent(
 	val idempotencyKey: String = UUID.randomUUID().toString(),
 	val partitionKey: String? = null,
 	val headers: Map<String, String>? = null,
-	val correlationId: String? = null,
-	val traceId: String? = null
+	val correlationId: String? = null
 )

@@ -4,6 +4,7 @@ import dev.fyke.core.inbox.FykeListener
 import dev.fyke.core.model.OrderingMode
 import dev.fyke.starter.Fyke
 import java.util.concurrent.CopyOnWriteArrayList
+import org.slf4j.LoggerFactory
 import org.springframework.amqp.core.Binding
 import org.springframework.amqp.core.BindingBuilder
 import org.springframework.amqp.core.Queue
@@ -21,9 +22,11 @@ class DemoApplication {
 
 	companion object {
 		const val EXCHANGE_NAME = "events.exchange"
+		const val DESTINATION = EXCHANGE_NAME
 		const val QUEUE_NAME = "orders.queue"
 		const val INBOX_QUEUE_NAME = "orders.inbox.queue"
 		const val ROUTING_KEY = "orders.created"
+		const val TARGET = ROUTING_KEY
 	}
 
 	@Bean
@@ -96,6 +99,8 @@ class OrderInboxConsumer {
 	var failForOrderId: String? = "42"
 	var fatalError = false
 
+	private val log = LoggerFactory.getLogger(javaClass)
+
 	@FykeListener(
 		destination = DemoApplication.INBOX_QUEUE_NAME,
 		ordering = OrderingMode.STRICT_FIFO,
@@ -108,6 +113,8 @@ class OrderInboxConsumer {
 			throw RuntimeException("Simulated transient failure for order: ${payload.orderId}")
 		}
 		receivedOrders.add(payload.orderId)
+
+		log.info("Received order: {}", payload)
 	}
 }
 

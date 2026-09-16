@@ -65,7 +65,8 @@ object Fyke {
 		payload: Any,
 		partitionKey: String? = null,
 		target: String? = null,
-		headers: Map<String, String>? = null
+		headers: Map<String, String>? = null,
+		correlationId: String? = null
 	): OutboxRecord {
 		return send(
 			OutboxEvent(
@@ -75,7 +76,8 @@ object Fyke {
 				payload = payload,
 				partitionKey = partitionKey,
 				target = target,
-				headers = headers
+				headers = headers,
+				correlationId = correlationId
 			)
 		)
 	}

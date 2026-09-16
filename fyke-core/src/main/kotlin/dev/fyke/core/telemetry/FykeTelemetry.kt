@@ -78,16 +78,26 @@ class FykeTelemetry(
 		backlogGauge.set(depth)
 	}
 
+	/**
+	 * Returns the trace ID of the currently active OpenTelemetry span, or null if no valid span is active.
+	 */
+	fun currentTraceId(): String? {
+		val spanContext = Span.current().spanContext
+		return if (spanContext.isValid) spanContext.traceId else null
+	}
+
 	fun <T> recordSpan(spanName: String, attributes: Map<String, String> = emptyMap(), block: (Span) -> T): T {
 		val span = tracer.spanBuilder(spanName).startSpan()
 		val sanitized = sanitizer.sanitizeAttributes(attributes)
 		sanitized.forEach { (k, v) -> span.setAttribute(k, v) }
+		val scope = span.makeCurrent()
 		return try {
 			block(span)
 		} catch (t: Throwable) {
 			span.recordException(t)
 			throw t
 		} finally {
+			scope.close()
 			span.end()
 		}
 	}

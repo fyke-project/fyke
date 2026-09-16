@@ -53,6 +53,24 @@ class RabbitBinderTest {
 	}
 
 	@Test
+	fun `should propagate traceId header when present`() {
+		val messageSlot = slot<Message>()
+		val correlationSlot = slot<CorrelationData>()
+
+		every {
+			rabbitTemplate.send(any<String>(), any<String>(), capture(messageSlot), capture(correlationSlot))
+		} answers {
+			correlationSlot.captured.future.complete(CorrelationData.Confirm(true, null))
+		}
+
+		val recordWithTrace = sampleRecord.copy(traceId = "0af7651916cd43dd8448eb211c80319c")
+		binder.publish(recordWithTrace)
+
+		val sentMessage = messageSlot.captured
+		assertThat(sentMessage.messageProperties.headers["x-fyke-trace-id"]).isEqualTo("0af7651916cd43dd8448eb211c80319c")
+	}
+
+	@Test
 	fun `should return TransientFailure when broker NACKs`() {
 		val correlationSlot = slot<CorrelationData>()
 

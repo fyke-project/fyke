@@ -36,6 +36,7 @@ class RabbitBinder(
 			setHeader("x-fyke-business-key", record.businessKey)
 			setHeader("x-fyke-type", record.type)
 			setHeader("x-fyke-partition-key", record.partitionKey)
+			record.traceId?.let { setHeader("x-fyke-trace-id", it) }
 
 			record.headers?.forEach { (key, value) ->
 				setHeader(key, value)

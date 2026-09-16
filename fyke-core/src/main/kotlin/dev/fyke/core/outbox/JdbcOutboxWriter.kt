@@ -28,32 +28,8 @@ class JdbcOutboxWriter(
 	private val log = LoggerFactory.getLogger(javaClass)
 
 	override fun write(event: OutboxEvent): OutboxRecord {
-		val payloadBytes = serializer.serialize(event.payload)
-		val payloadHash = serializer.computeHash(payloadBytes)
-		val partitionKey = event.partitionKey ?: partitionResolver.resolvePartition(event)
-		val now = Instant.now()
-		val recordId = UUID.randomUUID()
-
-		val record = OutboxRecord(
-			id = recordId,
-			partitionKey = partitionKey,
-			type = event.type,
-			destination = event.destination,
-			target = event.target,
-			businessKey = event.businessKey,
-			idempotencyKey = event.idempotencyKey,
-			contentType = serializer.contentType(),
-			payload = payloadBytes,
-			payloadHash = payloadHash,
-			headers = event.headers,
-			correlationId = event.correlationId,
-			traceId = event.traceId,
-			size = payloadBytes.size,
-			createdAt = now,
-			updatedAt = now
-		)
-
 		val txActive = TransactionSynchronizationManager.isActualTransactionActive()
+		val recordId = UUID.randomUUID()
 		if (!txActive) {
 			log.warn(
 				"Fyke: Event '{}' (id={}) captured outside an active Spring @Transactional boundary.",
@@ -62,14 +38,39 @@ class JdbcOutboxWriter(
 			)
 		}
 
-		telemetry.recordSpan(
+		return telemetry.recordSpan(
 			"fyke.outbox.capture", mapOf(
 				"business_key" to event.businessKey,
 				"type" to event.type,
 				"destination" to event.destination,
 				"idempotency_key" to event.idempotencyKey
 			)
-		) {
+		) { span ->
+			val traceId = if (span.spanContext.isValid) span.spanContext.traceId else null
+			val payloadBytes = serializer.serialize(event.payload)
+			val payloadHash = serializer.computeHash(payloadBytes)
+			val partitionKey = event.partitionKey ?: partitionResolver.resolvePartition(event)
+			val now = Instant.now()
+
+			val record = OutboxRecord(
+				id = recordId,
+				partitionKey = partitionKey,
+				type = event.type,
+				destination = event.destination,
+				target = event.target,
+				businessKey = event.businessKey,
+				idempotencyKey = event.idempotencyKey,
+				contentType = serializer.contentType(),
+				payload = payloadBytes,
+				payloadHash = payloadHash,
+				headers = event.headers,
+				correlationId = event.correlationId,
+				traceId = traceId,
+				size = payloadBytes.size,
+				createdAt = now,
+				updatedAt = now
+			)
+
 			val conn = DataSourceUtils.getConnection(dataSource)
 			try {
 				outboxStore.save(record)
@@ -98,8 +99,8 @@ class JdbcOutboxWriter(
 			} finally {
 				DataSourceUtils.releaseConnection(conn, dataSource)
 			}
-		}
 
-		return record
+			record
+		}
 	}
 }
