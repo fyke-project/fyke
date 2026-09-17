@@ -162,6 +162,7 @@ class FykeAutoConfiguration {
 	@Bean
 	@ConditionalOnClass(RabbitTemplate::class)
 	@ConditionalOnBean(RabbitTemplate::class)
+	@ConditionalOnProperty(prefix = "fyke", name = ["binder"], havingValue = "rabbitmq", matchIfMissing = true)
 	@ConditionalOnMissingBean(name = ["rabbitBinder"])
 	fun rabbitBinder(rabbitTemplate: RabbitTemplate, properties: FykeProperties): BrokerBinder {
 		return RabbitBinder(
@@ -173,6 +174,7 @@ class FykeAutoConfiguration {
 	@Bean
 	@ConditionalOnClass(RabbitTemplate::class)
 	@ConditionalOnBean(RabbitTemplate::class)
+	@ConditionalOnProperty(prefix = "fyke", name = ["binder"], havingValue = "rabbitmq", matchIfMissing = true)
 	@ConditionalOnMissingBean
 	fun fykeRabbitDlqRecoverer(
 		outboxStore: OutboxStore,
@@ -184,6 +186,7 @@ class FykeAutoConfiguration {
 	@Bean
 	@ConditionalOnClass(KafkaTemplate::class)
 	@ConditionalOnBean(KafkaTemplate::class)
+	@ConditionalOnProperty(prefix = "fyke", name = ["binder"], havingValue = "kafka", matchIfMissing = true)
 	@ConditionalOnMissingBean(name = ["kafkaBinder"])
 	fun kafkaBinder(kafkaTemplate: KafkaTemplate<*, *>, properties: FykeProperties): BrokerBinder {
 		@Suppress("UNCHECKED_CAST")
@@ -196,6 +199,7 @@ class FykeAutoConfiguration {
 	@Bean
 	@ConditionalOnClass(KafkaTemplate::class)
 	@ConditionalOnBean(KafkaTemplate::class)
+	@ConditionalOnProperty(prefix = "fyke", name = ["binder"], havingValue = "kafka", matchIfMissing = true)
 	@ConditionalOnMissingBean
 	fun fykeKafkaDlqRecoverer(
 		outboxStore: OutboxStore,
@@ -345,6 +349,7 @@ class FykeAutoConfiguration {
 	@Bean
 	@ConditionalOnClass(ConnectionFactory::class)
 	@ConditionalOnBean(ConnectionFactory::class)
+	@ConditionalOnProperty(prefix = "fyke", name = ["binder"], havingValue = "rabbitmq", matchIfMissing = true)
 	@ConditionalOnMissingBean
 	fun rabbitConsumerRegistrar(
 		connectionFactory: ConnectionFactory,
@@ -363,6 +368,7 @@ class FykeAutoConfiguration {
 	@Bean
 	@ConditionalOnClass(ConsumerFactory::class)
 	@ConditionalOnBean(ConsumerFactory::class)
+	@ConditionalOnProperty(prefix = "fyke", name = ["binder"], havingValue = "kafka", matchIfMissing = true)
 	@ConditionalOnMissingBean
 	fun kafkaConsumerRegistrar(
 		consumerFactory: ConsumerFactory<*, *>,

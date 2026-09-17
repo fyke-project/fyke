@@ -59,7 +59,12 @@ class RabbitConsumerRegistrar(
 	}
 
 	private fun registerFykeListener(bean: Any, method: Method, annotation: FykeListener) {
-		val destination = annotation.destination
+		val env = try {
+			applicationContext.environment
+		} catch (_: Exception) {
+			null
+		}
+		val destination = env?.resolvePlaceholders(annotation.destination)?.ifBlank { null } ?: annotation.destination
 		inboxPollerEngine.registerListener(destination, bean, method)
 
 		// Create container per destination queue if not already created

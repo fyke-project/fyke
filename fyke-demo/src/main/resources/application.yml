@@ -5,19 +5,8 @@ spring:
     url: jdbc:postgresql://localhost:5432/fyke
     username: fyke
     password: fyke
-  rabbitmq:
-    host: localhost
-    port: 5672
-    username: guest
-    password: guest
-    publisher-confirm-type: correlated
-    publisher-returns: true
-    listener:
-      simple:
-        retry:
-          enabled: true
-          max-attempts: 3
-          initial-interval: 50ms
+  profiles:
+    default: rabbitmq
 
 fyke:
   enabled: true
@@ -45,3 +34,14 @@ fyke:
 
   retention:
     enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+    fyke:
+      access: UNRESTRICTED

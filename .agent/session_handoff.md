@@ -104,44 +104,28 @@ Updated `docs/requirements-p1.md`, `docs/architecture.md`, and `docs/decisions.m
    - **Testcontainers Verification**: Verified with real Apache Kafka (`apache/kafka:3.7.0` in KRaft mode) and full suite passing.
    - **Documentation**: Updated `README.md` and `CHANGELOG.md` with Transactional Inbox, logging, and Kafka details.
 
+10. **Spring Boot Actuator Health, Management Endpoint & Micrometer Metrics**:
+    - **`FykeHealthIndicator`**: Implements Spring Boot 4 `HealthIndicator` (`org.springframework.boot.health.contributor.HealthIndicator`). Provides operational status for `outbox`, `inbox`, and `dlq` with pending/dead counts. Crucially remains `UP` during broker outages to prevent false-positive Kubernetes pod restart cascades.
+    - **`FykeEndpoint`**: Implements Spring Boot Actuator `@Endpoint(id = "fyke")` with `@ReadOperation` exposing operational diagnostics (`FykeDiagnosticsSnapshot`), active broker binder, engine settings (batch size, lease duration, concurrency), registered `@FykeListener` instances, active notification channels (`LISTEN/NOTIFY` vs `TIMER`), and live store counters.
+    - **`FykeMeterBinder`**: Implements Micrometer's `MeterBinder`, registering gauges for `fyke.outbox.backlog`, `fyke.outbox.dead`, `fyke.inbox.backlog`, `fyke.inbox.dead`, and `fyke.dlq.unreplayed`.
+    - **Zero-Overhead CompileOnly**: Actuator and Micrometer dependencies are strictly `compileOnly` in `fyke-spring-boot-starter`. `FykeActuatorAutoConfiguration` gracefully backs off if Actuator/Micrometer classes are absent.
+    - **Testcontainers Verification**: Verified against real PostgreSQL 16 and RabbitMQ 3.13 containers via `FykeActuatorIntegrationTest` using `MockMvc`.
+
 ---
 
 ## 3. Current Status & Git History
 
-All tasks for **P1**, Inbox enhancements, Logging pipeline, and Kafka Binder are 100% complete, verified, and committed.
-
-### Git Log
-```text
-a403421 feat(binder-kafka): implement Kafka binder, consumer registrar, and update docs
-0916583 refactor(naming): enforce explicit outbox/inbox symmetry across channels and components
-9d84772 feat(logging): add structured debug and trace logs across core, binder, and starter
-2bf9edb feat(telemetry): auto-populate traceId and remove traceId from OutboxEvent
-79da986 docs(handoff): update session handoff with package and config symmetry
-1d0dba0 refactor: reorganize outbox package and structure symmetrical configuration
-77c7c05 feat(poller): wire LISTEN/NOTIFY to inbox and extract AbstractPollerEngine
-9c6f680 feat(inbox): implement transactional inbox, @FykeListener, and per-partition ordering
-f9ecc5b build: exclude .idea directory from Spotless formatters
-940dc2a docs: add quickstart guide in README and initial changelog
-77122e9 feat(demo): add demo application, rest controller, and testcontainers suite
-aff0b76 feat(starter): provide Spring Boot auto-configuration and Fyke facade
-2414d97 feat(binder-rabbitmq): implement RabbitMQ binder and poison-pill recoverer
-b4c3a9c feat(core): implement outbox engine, partitioning, poller, and DLQ
-cc0317c docs: update requirements and architecture for partitioning, binary payload, and retention
-7dd4679 build: initialize Gradle multi-module project and developer tooling
-4b4edf2 docs: agent implementation brief for P1 (no code yet)
-```
+All tasks for **P1**, Inbox enhancements, Logging pipeline, Kafka Binder, Actuator Health/Endpoint, and Micrometer Metrics are 100% complete, verified, and passing under `./gradlew check`.
 
 ### Verification Command
 ```bash
 ./gradlew check
-# All 84 actionable tasks pass (Spotless, compilation, unit tests, and Testcontainers integration tests).
+# All 108 actionable tasks pass (Spotless, compilation, unit tests, and Testcontainers integration tests).
 ```
 
 ---
 
 ## 4. Exact Next Steps
-
-With P1 and both RabbitMQ & Kafka binders fully delivered and green, here are the exact next priorities:
 
 1. **Benchmarking & High-Concurrency Load Tests**
    - Set up Gatling or JMH benchmarks in `fyke-demo` or a dedicated module.
@@ -153,16 +137,5 @@ With P1 and both RabbitMQ & Kafka binders fully delivered and green, here are th
    - Provide a reactive `ReactiveOutboxWriter` implementation using `DatabaseClient` for WebFlux/R2DBC applications.
 
 3. **Prepare for P2 (Remote Control Plane / SaaS Seam)**
-   - Verify that the metadata model in `FykeRecordSummary` contains everything needed for the future remote observer/replay relay.
-   - Maintain strict air-gap: ensure any future gRPC/HTTP control-plane agent remains a completely optional, separate dependency (`fyke-exporter-controlplane`).
-   - Set up Gatling or JMH benchmarks in `fyke-demo` or a dedicated module.
-   - Benchmark throughput with 10,000+ events across multiple concurrent partitions and committers.
-   - Measure latency between transaction commit and broker receipt on the `LISTEN`/`NOTIFY` path.
-
-3. **R2DBC / Reactive Seam Evaluation (P1.x)**
-   - Evaluate R2DBC support as designed in ADR D-005.
-   - Provide a reactive `ReactiveOutboxWriter` implementation using `DatabaseClient` for WebFlux/R2DBC applications.
-
-4. **Prepare for P2 (Remote Control Plane / SaaS Seam)**
    - Verify that the metadata model in `FykeRecordSummary` contains everything needed for the future remote observer/replay relay.
    - Maintain strict air-gap: ensure any future gRPC/HTTP control-plane agent remains a completely optional, separate dependency (`fyke-exporter-controlplane`).

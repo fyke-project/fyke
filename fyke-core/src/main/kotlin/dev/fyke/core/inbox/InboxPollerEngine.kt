@@ -77,6 +77,8 @@ class InboxPollerEngine(
 		)
 	}
 
+	fun getRegisteredListeners(): Map<String, List<InboxListenerRegistration>> = listeners.toMap()
+
 	override fun findPendingPartitions(): List<String> {
 		return inboxStore.findPendingPartitions()
 	}

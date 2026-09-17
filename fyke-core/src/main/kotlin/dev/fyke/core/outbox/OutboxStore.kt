@@ -28,6 +28,8 @@ interface OutboxStore {
 	fun purgePublished(cutoff: Instant, batchSize: Int): Int
 	fun purgeDlq(cutoff: Instant, batchSize: Int): Int
 	fun countPending(): Long
+	fun countDead(): Long
+	fun countUnreplayedDlq(): Long
 }
 
 class DuplicateIdempotencyKeyException(key: String) :

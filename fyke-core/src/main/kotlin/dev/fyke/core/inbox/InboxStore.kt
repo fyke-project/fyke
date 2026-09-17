@@ -76,4 +76,9 @@ interface InboxStore {
 	 * Counts the total number of pending inbox records.
 	 */
 	fun countPending(): Long
+
+	/**
+	 * Counts the total number of dead inbox records.
+	 */
+	fun countDead(): Long
 }

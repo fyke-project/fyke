@@ -22,11 +22,11 @@ import javax.sql.DataSource
  */
 abstract class AbstractPollerEngine<T : Any>(
 	private val partitionLocker: PartitionLocker,
-	private val notificationSources: List<NotificationSource>,
+	val notificationSources: List<NotificationSource>,
 	private val dataSource: DataSource,
-	protected val batchSize: Int,
-	protected val leaseDuration: Duration,
-	protected val concurrency: Int = 1,
+	val batchSize: Int,
+	val leaseDuration: Duration,
+	val concurrency: Int = 1,
 	private val threadPrefix: String = "fyke-poller"
 ) {
 

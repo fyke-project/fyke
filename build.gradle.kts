@@ -101,6 +101,7 @@ subprojects {
 
 	tasks.withType<Test> {
 		useJUnitPlatform()
+		maxHeapSize = "2048m"
 		val dockerSock = File("${System.getProperty("user.home")}/.docker/run/docker.sock")
 		if (dockerSock.exists() && System.getenv("DOCKER_HOST") == null) {
 			environment("DOCKER_HOST", "unix://${dockerSock.absolutePath}")

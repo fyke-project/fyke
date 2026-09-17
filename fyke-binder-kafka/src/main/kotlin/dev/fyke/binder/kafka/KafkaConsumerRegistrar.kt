@@ -61,7 +61,12 @@ class KafkaConsumerRegistrar(
 	}
 
 	private fun registerFykeListener(bean: Any, method: Method, annotation: FykeListener) {
-		val destination = annotation.destination
+		val env = try {
+			applicationContext.environment
+		} catch (_: Exception) {
+			null
+		}
+		val destination = env?.resolvePlaceholders(annotation.destination)?.ifBlank { null } ?: annotation.destination
 		inboxPollerEngine.registerListener(destination, bean, method)
 
 		containers.computeIfAbsent(destination) { topic ->
@@ -79,7 +84,8 @@ class KafkaConsumerRegistrar(
 				defaultPartitionResolver
 			}
 
-			val groupId = annotation.consumerGroup.ifBlank { "fyke-consumer-$topic" }
+			val rawGroupId = annotation.consumerGroup.ifBlank { "fyke-consumer-$topic" }
+			val groupId = env?.resolvePlaceholders(rawGroupId)?.ifBlank { null } ?: rawGroupId
 			val containerProps = ContainerProperties(topic).apply {
 				setGroupId(groupId)
 				setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE)

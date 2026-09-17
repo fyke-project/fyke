@@ -243,7 +243,9 @@ if (retried) {
 
 ---
 
-## Observability & Structured Logging
+## Observability & Operations
+
+### Structured Logging
 
 Fyke enforces strict zero payload leakage in logs while providing operational diagnostics:
 - **No Payload Leakage**: Raw message payloads are never logged at `DEBUG` or `INFO`. Only record IDs, partition keys, business keys, event types, and byte sizes are recorded.
@@ -254,6 +256,58 @@ Fyke enforces strict zero payload leakage in logs while providing operational di
   - `DEBUG`: Batch claim counts and lease durations, publish timings, replays and retries.
   - `TRACE`: PostgreSQL advisory locks, `LISTEN`/`NOTIFY` ticks, payload serialization sizes, headers.
 
+### Spring Boot Actuator Health (`/actuator/health`)
+
+Fyke provides a dedicated `FykeHealthIndicator` reporting component health under the `fyke` key. Crucially, it remains **resilient during broker outages**: Fyke reports `UP` with pending backlog and dead counters rather than failing the Kubernetes liveness/readiness probe, allowing the application to continue serving traffic while buffering events safely in the database.
+
+Sample health payload:
+```json
+{
+  "status": "UP",
+  "components": {
+    "fyke": {
+      "status": "UP",
+      "details": {
+        "outbox": {
+          "status": "UP",
+          "pending": 0,
+          "dead": 0
+        },
+        "inbox": {
+          "status": "UP",
+          "pending": 0,
+          "dead": 0
+        },
+        "dlq": {
+          "unreplayed": 0
+        }
+      }
+    }
+  }
+}
+```
+
+### Dedicated Management Endpoint (`/actuator/fyke`)
+
+A read-only management endpoint exposing operational diagnostics without risk of state mutation:
+- Active broker binder and engine configurations (batch size, lease duration, concurrency).
+- Active notification sources (`LISTEN/NOTIFY` vs `TIMER`).
+- Registered `@FykeListener` consumer mappings.
+- Live store counters (pending, dead, unreplayed DLQ).
+
+### Micrometer Metrics
+
+When Micrometer is on the classpath, `FykeMeterBinder` automatically registers the following gauges:
+
+| Metric Name | Description |
+|---|---|
+| `fyke.outbox.backlog` | Count of pending outbox events awaiting broker dispatch. |
+| `fyke.outbox.dead` | Count of outbox events moved to DEAD status. |
+| `fyke.inbox.backlog` | Count of pending inbox events awaiting consumer processing. |
+| `fyke.inbox.dead` | Count of inbox events moved to DEAD status. |
+| `fyke.dlq.unreplayed` | Count of dead-letter records in `fyke_dlq` not yet replayed. |
+
+*Note: Actuator and Micrometer are strictly optional (`compileOnly`). If omitted in consumer apps, Fyke's actuator configuration gracefully backs off with zero overhead.*
 
 ---
 
@@ -263,8 +317,9 @@ Fyke enforces strict zero payload leakage in logs while providing operational di
 |---|---|
 | `fyke-core` | Core domain models, Liquibase changelog, `OutboxStore`, `InboxStore`, `OutboxPollerEngine`, `InboxPollerEngine`, partitioning, retention cleaner, and OpenTelemetry. |
 | `fyke-binder-rabbitmq` | Spring AMQP RabbitMQ binder with publisher confirms and `FykeRabbitDlqRecoverer`. |
-| `fyke-spring-boot-starter` | Spring Boot 4 auto-configuration and `Fyke` static facade. |
-| `fyke-demo` | Complete demonstration app with Testcontainers verification suite. |
+| `fyke-binder-kafka` | Apache Kafka binder with Spring Kafka 4.1+, manual immediate offset commits, and `FykeKafkaDlqRecoverer`. |
+| `fyke-spring-boot-starter` | Spring Boot 4 auto-configuration, `Fyke` static facade, Actuator health & endpoint, and Micrometer metrics. |
+| `fyke-demo` | Complete demonstration app with Testcontainers verification suite (PostgreSQL, RabbitMQ, Kafka). |
 
 ---
 

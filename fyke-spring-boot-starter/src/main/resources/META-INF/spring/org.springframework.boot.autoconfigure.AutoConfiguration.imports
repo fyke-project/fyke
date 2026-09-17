@@ -1,1 +1,2 @@
 dev.fyke.starter.FykeAutoConfiguration
+dev.fyke.starter.actuator.FykeActuatorAutoConfiguration

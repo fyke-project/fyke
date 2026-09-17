@@ -260,6 +260,13 @@ class JdbcInboxStore(
 		return count
 	}
 
+	override fun countDead(): Long {
+		val sql = "SELECT COUNT(*) FROM fyke_inbox WHERE status = 'DEAD'"
+		val count = jdbcTemplate.queryForObject(sql, Long::class.java) ?: 0L
+		log.trace("Fyke: Dead inbox count: {}", count)
+		return count
+	}
+
 	private fun setJsonOrString(ps: java.sql.PreparedStatement, index: Int, json: String?, conn: java.sql.Connection) {
 		if (json == null) {
 			ps.setNull(index, java.sql.Types.OTHER)

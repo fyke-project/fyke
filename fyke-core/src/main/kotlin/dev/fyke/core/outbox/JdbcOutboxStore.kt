@@ -347,6 +347,20 @@ class JdbcOutboxStore(
 		return count
 	}
 
+	override fun countDead(): Long {
+		val sql = "SELECT COUNT(*) FROM fyke_outbox WHERE status = 'DEAD'"
+		val count = jdbcTemplate.queryForObject(sql, Long::class.java) ?: 0L
+		log.trace("Fyke: Dead outbox count: {}", count)
+		return count
+	}
+
+	override fun countUnreplayedDlq(): Long {
+		val sql = "SELECT COUNT(*) FROM fyke_dlq WHERE replayed_at IS NULL"
+		val count = jdbcTemplate.queryForObject(sql, Long::class.java) ?: 0L
+		log.trace("Fyke: Unreplayed DLQ count: {}", count)
+		return count
+	}
+
 	private fun setJsonOrString(ps: java.sql.PreparedStatement, index: Int, json: String?, conn: java.sql.Connection) {
 		if (json == null) {
 			ps.setNull(index, java.sql.Types.OTHER)
