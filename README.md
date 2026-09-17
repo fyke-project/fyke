@@ -159,9 +159,36 @@ fun placeOrder(orderId: String, amount: BigDecimal) {
 
 ---
 
+## Consuming Events with Transactional Inbox
+
+Fyke provides a transactional inbox pattern ensuring deduplication, wire-order execution, and poison pill isolation:
+
+```kotlin
+import dev.fyke.core.inbox.FykeListener
+import dev.fyke.core.model.OrderingMode
+import org.springframework.stereotype.Component
+
+@Component
+class OrderEventListener {
+
+    @FykeListener(
+        destination = "orders.queue",
+        ordering = OrderingMode.STRICT_FIFO,
+        partitionKeyProperty = "orderId"
+    )
+    fun onOrderCreated(event: OrderCreatedEvent) {
+        // Incoming message is committed to fyke_inbox and ACKed to broker immediately.
+        // Background poller executes the listener in strict per-partition FIFO order.
+        // Poison pills are moved directly to fyke_dlq without stalling the queue.
+    }
+}
+```
+
+---
+
 ## Consumer Poison-Pill DLQ Protection
 
-Fyke captures poison pills from failing message consumers directly into `fyke_dlq`:
+Fyke captures poison pills from failing message consumers directly into `fyke_dlq` (either automatically via `@FykeListener` or through a Spring AMQP `MessageRecoverer`):
 
 ```kotlin
 @Configuration
@@ -188,25 +215,45 @@ class RabbitConsumerConfig {
 
 ---
 
-## In-JVM Search & Replay
+## In-JVM Search, Replay & Retry
 
-When events fail or get captured in the DLQ, investigate and replay them without leaving the JVM:
+When events fail or get captured in the DLQ, investigate, replay, and unblock them without leaving the JVM:
 
 ```kotlin
 import dev.fyke.starter.Fyke
 
-// 1. Search outbox and DLQ records by business key (e.g. orderId)
+// 1. Search across outbox, inbox, and DLQ records by business key (e.g. orderId)
 val records = Fyke.searchByBusinessKey("order-12345")
 records.forEach { record ->
     println("ID: ${record.id} [${record.status}] source=${record.source} error=${record.reason}")
 }
 
-// 2. Replay a dead-lettered message directly to the broker
-val replayed = Fyke.replay(recordId)
+// 2. Replay a dead-lettered outbox event directly back to the broker
+val replayed = Fyke.replayOutbox(outboxRecordId) // or Fyke.replay(outboxRecordId)
 if (replayed) {
-    println("Event successfully re-published to broker!")
+    println("Outbox event successfully re-published to broker!")
+}
+
+// 3. Immediately unblock and re-trigger execution of a stuck or retrying inbox event
+val retried = Fyke.retryInbox(inboxRecordId)
+if (retried) {
+    println("Inbox event execution triggered!")
 }
 ```
+
+---
+
+## Observability & Structured Logging
+
+Fyke enforces strict zero payload leakage in logs while providing operational diagnostics:
+- **No Payload Leakage**: Raw message payloads are never logged at `DEBUG` or `INFO`. Only record IDs, partition keys, business keys, event types, and byte sizes are recorded.
+- **Level Separation**:
+  - `INFO`: Component startup/shutdown, registered listeners, retention purge counts.
+  - `WARN`: Missing active transaction at write time, retry scheduled with backoff delay.
+  - `ERROR`: Exhausted retries, poison pills routed to `fyke_dlq`.
+  - `DEBUG`: Batch claim counts and lease durations, publish timings, replays and retries.
+  - `TRACE`: PostgreSQL advisory locks, `LISTEN`/`NOTIFY` ticks, payload serialization sizes, headers.
+
 
 ---
 

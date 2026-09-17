@@ -22,8 +22,12 @@ data class FykeProperties(
 	var liquibase: LiquibaseProperties = LiquibaseProperties(),
 	/** Telemetry client-side payload sanitization properties. */
 	var sanitization: SanitizationProperties = SanitizationProperties(),
+	/** Selected broker binder ('rabbitmq', 'kafka', or empty for auto-detection). */
+	var binder: String = "",
 	/** RabbitMQ binder properties. */
-	var rabbitmq: RabbitMqProperties = RabbitMqProperties()
+	var rabbitmq: RabbitMqProperties = RabbitMqProperties(),
+	/** Kafka binder properties. */
+	var kafka: KafkaProperties = KafkaProperties()
 ) {
 	/**
 	 * Configurable retention settings for a specific queue or store.
@@ -150,6 +154,14 @@ data class FykeProperties(
 	 */
 	data class RabbitMqProperties(
 		/** Timeout waiting for RabbitMQ publisher ACK confirmation. */
+		var confirmTimeout: Duration = Duration.ofSeconds(5)
+	)
+
+	/**
+	 * Kafka binder configuration.
+	 */
+	data class KafkaProperties(
+		/** Timeout waiting for Kafka publisher confirmation. */
 		var confirmTimeout: Duration = Duration.ofSeconds(5)
 	)
 }

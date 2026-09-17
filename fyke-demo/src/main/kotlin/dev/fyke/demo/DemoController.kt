@@ -32,14 +32,13 @@ class DemoController(
 		@RequestParam(required = false) tenant: String = "000001",
 		@RequestParam(required = false) orderId: String = UUID.randomUUID().toString(),
 	): OutboxRecord {
-		val id = UUID.randomUUID().toString()
 		return Fyke.send(
 			type = "order",
 			destination = DemoApplication.DESTINATION,
 			target = DemoApplication.TARGET,
-			businessKey = id,
+			businessKey = orderId,
 			payload = OrderCreatedPayload(
-				orderId = id,
+				orderId = orderId,
 				customer = "test-customer",
 				amount = 42.42,
 			),

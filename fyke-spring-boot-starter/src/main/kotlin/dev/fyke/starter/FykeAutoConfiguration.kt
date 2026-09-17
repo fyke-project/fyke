@@ -1,6 +1,9 @@
 package dev.fyke.starter
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import dev.fyke.binder.kafka.FykeKafkaDlqRecoverer
+import dev.fyke.binder.kafka.KafkaBinder
+import dev.fyke.binder.kafka.KafkaConsumerRegistrar
 import dev.fyke.binder.rabbit.FykeRabbitDlqRecoverer
 import dev.fyke.binder.rabbit.RabbitBinder
 import dev.fyke.binder.rabbit.RabbitConsumerRegistrar
@@ -36,6 +39,8 @@ import liquibase.integration.spring.SpringLiquibase
 import org.slf4j.LoggerFactory
 import org.springframework.amqp.rabbit.connection.ConnectionFactory
 import org.springframework.amqp.rabbit.core.RabbitTemplate
+import org.springframework.kafka.core.ConsumerFactory
+import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.AutoConfiguration
@@ -54,7 +59,8 @@ import javax.sql.DataSource
 @AutoConfiguration(
 	afterName = [
 		"org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
-		"org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration"
+		"org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration",
+		"org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration"
 	]
 )
 @ConditionalOnClass(DataSource::class)
@@ -156,7 +162,7 @@ class FykeAutoConfiguration {
 	@Bean
 	@ConditionalOnClass(RabbitTemplate::class)
 	@ConditionalOnBean(RabbitTemplate::class)
-	@ConditionalOnMissingBean
+	@ConditionalOnMissingBean(name = ["rabbitBinder"])
 	fun rabbitBinder(rabbitTemplate: RabbitTemplate, properties: FykeProperties): BrokerBinder {
 		return RabbitBinder(
 			rabbitTemplate = rabbitTemplate,
@@ -173,6 +179,29 @@ class FykeAutoConfiguration {
 		telemetry: FykeTelemetry
 	): FykeRabbitDlqRecoverer {
 		return FykeRabbitDlqRecoverer(outboxStore, telemetry)
+	}
+
+	@Bean
+	@ConditionalOnClass(KafkaTemplate::class)
+	@ConditionalOnBean(KafkaTemplate::class)
+	@ConditionalOnMissingBean(name = ["kafkaBinder"])
+	fun kafkaBinder(kafkaTemplate: KafkaTemplate<*, *>, properties: FykeProperties): BrokerBinder {
+		@Suppress("UNCHECKED_CAST")
+		return KafkaBinder(
+			kafkaTemplate = kafkaTemplate as KafkaTemplate<String, ByteArray>,
+			confirmTimeoutMs = properties.kafka.confirmTimeout.toMillis()
+		)
+	}
+
+	@Bean
+	@ConditionalOnClass(KafkaTemplate::class)
+	@ConditionalOnBean(KafkaTemplate::class)
+	@ConditionalOnMissingBean
+	fun fykeKafkaDlqRecoverer(
+		outboxStore: OutboxStore,
+		telemetry: FykeTelemetry
+	): FykeKafkaDlqRecoverer {
+		return FykeKafkaDlqRecoverer(outboxStore, telemetry)
 	}
 
 	@Bean("outboxNotificationSources")
@@ -240,8 +269,14 @@ class FykeAutoConfiguration {
 		dataSource: DataSource,
 		properties: FykeProperties
 	): OutboxPollerEngine {
-		val brokerBinder = brokerBinderProvider.ifAvailable
-			?: error("No BrokerBinder bean available. Ensure fyke-binder-rabbitmq (with Spring AMQP) is on the classpath or define a custom BrokerBinder bean.")
+		val binders = brokerBinderProvider.orderedStream().toList()
+		val brokerBinder = when {
+			binders.isEmpty() -> error("No BrokerBinder bean available. Ensure fyke-binder-rabbitmq or fyke-binder-kafka is on the classpath or define a custom BrokerBinder bean.")
+			binders.size == 1 -> binders.first()
+			properties.binder.isNotBlank() -> binders.firstOrNull { it.name().equals(properties.binder, ignoreCase = true) }
+				?: error("Specified binder '${properties.binder}' not found among active binders: ${binders.map { it.name() }}")
+			else -> binders.first()
+		}
 		return OutboxPollerEngine(
 			outboxStore = outboxStore,
 			brokerBinder = brokerBinder,
@@ -319,6 +354,25 @@ class FykeAutoConfiguration {
 	): RabbitConsumerRegistrar {
 		return RabbitConsumerRegistrar(
 			connectionFactory = connectionFactory,
+			inboxStore = inboxStore,
+			inboxPollerEngine = inboxPollerEngine,
+			defaultPartitionResolver = consumerPartitionResolver
+		)
+	}
+
+	@Bean
+	@ConditionalOnClass(ConsumerFactory::class)
+	@ConditionalOnBean(ConsumerFactory::class)
+	@ConditionalOnMissingBean
+	fun kafkaConsumerRegistrar(
+		consumerFactory: ConsumerFactory<*, *>,
+		inboxStore: InboxStore,
+		inboxPollerEngine: InboxPollerEngine,
+		consumerPartitionResolver: ConsumerPartitionResolver
+	): KafkaConsumerRegistrar {
+		@Suppress("UNCHECKED_CAST")
+		return KafkaConsumerRegistrar(
+			consumerFactory = consumerFactory as ConsumerFactory<Any, Any>,
 			inboxStore = inboxStore,
 			inboxPollerEngine = inboxPollerEngine,
 			defaultPartitionResolver = consumerPartitionResolver

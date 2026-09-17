@@ -96,14 +96,27 @@ Updated `docs/requirements-p1.md`, `docs/architecture.md`, and `docs/decisions.m
    - **Granular Visibility**: Added `DEBUG` operational diagnostics (event capture, batch claims with lease duration, dispatch timing, replays, retries, DLQ routing, purge summaries) and `TRACE` mechanics (advisory locks, notifications, payload serialization metrics, headers, reflection dispatch details).
    - **Verification**: Tested with `FykeLoggingTest` verifying log emission and formatting without regressions.
 
+9. **Apache Kafka Binder (`fyke-binder-kafka`) & Documentation Polish**:
+   - **Kafka Binder SPI**: Implemented `KafkaBinder : BrokerBinder` using Spring Kafka 4.1.1 with asynchronous `CompletableFuture` producer confirmations.
+   - **Consumer Poison Pill DLQ**: Implemented `FykeKafkaDlqRecoverer` capturing consumer exceptions into `fyke_dlq`.
+   - **Consumer Ingestion**: Implemented `KafkaConsumerRegistrar` auto-wiring `@FykeListener` Kafka topic consumers with manual immediate offset commit (`AckMode.MANUAL_IMMEDIATE`) and inbox poller wakeup.
+   - **Auto-Configuration**: Added Spring Boot 4 auto-configuration support in `fyke-spring-boot-starter` with multi-binder resolution (`fyke.binder=rabbitmq|kafka`).
+   - **Testcontainers Verification**: Verified with real Apache Kafka (`apache/kafka:3.7.0` in KRaft mode) and full suite passing.
+   - **Documentation**: Updated `README.md` and `CHANGELOG.md` with Transactional Inbox, logging, and Kafka details.
+
 ---
 
 ## 3. Current Status & Git History
 
-All tasks for **P1**, Inbox enhancements, and Logging pipeline are 100% complete, verified, and committed.
+All tasks for **P1**, Inbox enhancements, Logging pipeline, and Kafka Binder are 100% complete, verified, and committed.
 
 ### Git Log
 ```text
+a403421 feat(binder-kafka): implement Kafka binder, consumer registrar, and update docs
+0916583 refactor(naming): enforce explicit outbox/inbox symmetry across channels and components
+9d84772 feat(logging): add structured debug and trace logs across core, binder, and starter
+2bf9edb feat(telemetry): auto-populate traceId and remove traceId from OutboxEvent
+79da986 docs(handoff): update session handoff with package and config symmetry
 1d0dba0 refactor: reorganize outbox package and structure symmetrical configuration
 77c7c05 feat(poller): wire LISTEN/NOTIFY to inbox and extract AbstractPollerEngine
 9c6f680 feat(inbox): implement transactional inbox, @FykeListener, and per-partition ordering
@@ -121,23 +134,27 @@ cc0317c docs: update requirements and architecture for partitioning, binary payl
 ### Verification Command
 ```bash
 ./gradlew check
-# All 89 actionable tasks pass (Spotless, compilation, unit tests, and Testcontainers integration tests).
+# All 84 actionable tasks pass (Spotless, compilation, unit tests, and Testcontainers integration tests).
 ```
 
 ---
 
 ## 4. Exact Next Steps
 
-With P1 fully delivered and green, here are the exact next priorities:
+With P1 and both RabbitMQ & Kafka binders fully delivered and green, here are the exact next priorities:
 
-1. **Implement Second Broker Binder: Kafka (`fyke-binder-kafka`)**
-   - Create new module `fyke-binder-kafka`.
-   - Implement `KafkaBinder : BrokerBinder` using Spring Kafka (`KafkaTemplate`) with producer acknowledgments (`SendResult.future`).
-   - Map `destination` to Kafka topic and `target` to partition key.
-   - Implement `FykeKafkaDlqRecoverer` (or `CommonErrorHandler` integration) for consumer poison pills.
-   - Add Testcontainers integration test with `confluentinc/cp-kafka` (or Kraft).
+1. **Benchmarking & High-Concurrency Load Tests**
+   - Set up Gatling or JMH benchmarks in `fyke-demo` or a dedicated module.
+   - Benchmark throughput with 10,000+ events across multiple concurrent partitions and committers.
+   - Measure latency between transaction commit and broker receipt on the `LISTEN`/`NOTIFY` path.
 
-2. **Benchmarking & High-Concurrency Load Tests**
+2. **R2DBC / Reactive Seam Evaluation (P1.x)**
+   - Evaluate R2DBC support as designed in ADR D-005.
+   - Provide a reactive `ReactiveOutboxWriter` implementation using `DatabaseClient` for WebFlux/R2DBC applications.
+
+3. **Prepare for P2 (Remote Control Plane / SaaS Seam)**
+   - Verify that the metadata model in `FykeRecordSummary` contains everything needed for the future remote observer/replay relay.
+   - Maintain strict air-gap: ensure any future gRPC/HTTP control-plane agent remains a completely optional, separate dependency (`fyke-exporter-controlplane`).
    - Set up Gatling or JMH benchmarks in `fyke-demo` or a dedicated module.
    - Benchmark throughput with 10,000+ events across multiple concurrent partitions and committers.
    - Measure latency between transaction commit and broker receipt on the `LISTEN`/`NOTIFY` path.

@@ -5,6 +5,7 @@ plugins {
 dependencies {
 	api(project(":fyke-core"))
 	api(project(":fyke-binder-rabbitmq"))
+	api(project(":fyke-binder-kafka"))
 
 	api("org.springframework.boot:spring-boot-starter")
 	api("org.springframework.boot:spring-boot-starter-jdbc")

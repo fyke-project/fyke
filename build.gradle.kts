@@ -101,5 +101,10 @@ subprojects {
 
 	tasks.withType<Test> {
 		useJUnitPlatform()
+		val dockerSock = File("${System.getProperty("user.home")}/.docker/run/docker.sock")
+		if (dockerSock.exists() && System.getenv("DOCKER_HOST") == null) {
+			environment("DOCKER_HOST", "unix://${dockerSock.absolutePath}")
+		}
+		systemProperty("api.version", "1.44")
 	}
 }

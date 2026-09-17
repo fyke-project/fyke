@@ -3,7 +3,9 @@ package dev.fyke.demo
 import dev.fyke.core.inbox.FykeListener
 import dev.fyke.core.model.OrderingMode
 import dev.fyke.starter.Fyke
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import org.slf4j.LoggerFactory
 import org.springframework.amqp.core.Binding
 import org.springframework.amqp.core.BindingBuilder
@@ -100,6 +102,8 @@ class OrderInboxConsumer {
 	var fatalError = false
 
 	private val log = LoggerFactory.getLogger(javaClass)
+	private val errorCounters: MutableMap<String, AtomicInteger> = ConcurrentHashMap<String, AtomicInteger>()
+	private val maxErrors = 1
 
 	@FykeListener(
 		destination = DemoApplication.INBOX_QUEUE_NAME,
@@ -109,7 +113,9 @@ class OrderInboxConsumer {
 		if (fatalError) {
 			throw IllegalArgumentException("Deterministic fatal validation failure for order: ${payload.orderId}")
 		}
-		if (failForOrderId == payload.orderId) {
+		val errorCounter = errorCounters.computeIfAbsent(payload.orderId) { AtomicInteger(0) }
+
+		if (failForOrderId == payload.orderId && errorCounter.getAndIncrement() < maxErrors) {
 			throw RuntimeException("Simulated transient failure for order: ${payload.orderId}")
 		}
 		receivedOrders.add(payload.orderId)
