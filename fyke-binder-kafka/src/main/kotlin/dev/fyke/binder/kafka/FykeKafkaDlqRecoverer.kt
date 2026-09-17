@@ -87,6 +87,7 @@ class FykeKafkaDlqRecoverer(
 		try {
 			outboxStore.saveDlq(dlqRecord)
 			telemetry.recordDlqMessage()
+			telemetry.notifyDlqCaptured(dlqRecord)
 			log.error(
 				"Fyke: Consumer poison pill captured in fyke_dlq (id={}, businessKey={}, topic={}, partition={}, offset={}): {}",
 				dlqRecord.id,

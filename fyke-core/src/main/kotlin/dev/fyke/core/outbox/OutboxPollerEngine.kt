@@ -51,7 +51,11 @@ class OutboxPollerEngine(
 	}
 
 	override fun claimBatch(partition: String): List<OutboxRecord> {
-		return outboxStore.claimBatch(batchSize, leaseDuration, partition)
+		val batch = outboxStore.claimBatch(batchSize, leaseDuration, partition)
+		for (record in batch) {
+			telemetry.notifyOutboxStatusChanged(record, OutboxStatus.NEW, OutboxStatus.DISPATCHING)
+		}
+		return batch
 	}
 
 	override fun onNoPendingPartitions() {
@@ -85,6 +89,7 @@ class OutboxPollerEngine(
 			is PublishResult.Success -> {
 				outboxStore.markPublished(record.id, Instant.now())
 				telemetry.recordPublished(durationMs)
+				telemetry.notifyOutboxStatusChanged(record.copy(status = OutboxStatus.PUBLISHED), OutboxStatus.DISPATCHING, OutboxStatus.PUBLISHED)
 				log.debug(
 					"Fyke: Successfully published record {} (type={}, businessKey={}) in {} ms",
 					record.id, record.type, record.businessKey, durationMs
@@ -98,6 +103,7 @@ class OutboxPollerEngine(
 					log.error("Fyke: Record {} exhausted retries; marking DEAD: {}", record.id, reason)
 					outboxStore.markDead(record.id, reason)
 					telemetry.recordDlqMessage()
+					telemetry.notifyOutboxStatusChanged(record.copy(status = OutboxStatus.DEAD, attempts = nextAttempt), OutboxStatus.DISPATCHING, OutboxStatus.DEAD, reason)
 				} else {
 					val backoff = backoffPolicy.calculate(nextAttempt)
 					val nextAttemptAt = Instant.now().plusMillis(backoff)
@@ -106,6 +112,7 @@ class OutboxPollerEngine(
 						record.id, nextAttempt, maxAttempts, backoff, result.cause.message
 					)
 					outboxStore.markRetry(record.id, nextAttempt, nextAttemptAt)
+					telemetry.notifyOutboxStatusChanged(record.copy(status = OutboxStatus.NEW, attempts = nextAttempt, nextAttemptAt = nextAttemptAt), OutboxStatus.DISPATCHING, OutboxStatus.NEW, result.cause.message)
 				}
 			}
 			is PublishResult.DeadLetter -> {
@@ -113,6 +120,7 @@ class OutboxPollerEngine(
 				telemetry.recordDlqMessage()
 				log.error("Fyke: Record {} rejected by binder; moving to DLQ: {}", record.id, result.reason)
 				outboxStore.markDead(record.id, result.reason)
+				telemetry.notifyOutboxStatusChanged(record.copy(status = OutboxStatus.DEAD), OutboxStatus.DISPATCHING, OutboxStatus.DEAD, result.reason)
 			}
 		}
 	}
@@ -140,6 +148,7 @@ class OutboxPollerEngine(
 			val result = brokerBinder.publish(record)
 			if (result is PublishResult.Success) {
 				outboxStore.markDlqReplayed(id, Instant.now())
+				telemetry.notifyOutboxStatusChanged(record.copy(status = OutboxStatus.PUBLISHED), OutboxStatus.DEAD, OutboxStatus.PUBLISHED)
 				log.info("Fyke: Replayed DLQ record {} to {}", id, dlq.destination)
 				return true
 			}
@@ -154,6 +163,7 @@ class OutboxPollerEngine(
 			val result = brokerBinder.publish(outbox)
 			if (result is PublishResult.Success) {
 				outboxStore.markPublished(id, Instant.now())
+				telemetry.notifyOutboxStatusChanged(outbox.copy(status = OutboxStatus.PUBLISHED), outbox.status, OutboxStatus.PUBLISHED)
 				log.info("Fyke: Replayed outbox record {} to {}", id, outbox.destination)
 				return true
 			}

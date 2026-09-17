@@ -31,6 +31,7 @@ import dev.fyke.core.retention.RetentionCleaner
 import dev.fyke.core.serializer.FykePayloadSerializer
 import dev.fyke.core.serializer.JacksonFykePayloadSerializer
 import dev.fyke.core.telemetry.ClientSideSanitizer
+import dev.fyke.core.telemetry.FykeEventListener
 import dev.fyke.core.telemetry.FykeTelemetry
 import dev.fyke.starter.annotation.FykeEvent
 import dev.fyke.starter.properties.FykeProperties
@@ -115,11 +116,13 @@ class FykeAutoConfiguration {
 	@ConditionalOnMissingBean
 	fun fykeTelemetry(
 		sanitizer: ClientSideSanitizer,
-		openTelemetry: Optional<OpenTelemetry>
+		openTelemetry: Optional<OpenTelemetry>,
+		listenersProvider: ObjectProvider<FykeEventListener>
 	): FykeTelemetry {
 		return FykeTelemetry(
 			openTelemetry = openTelemetry.orElse(null),
-			sanitizer = sanitizer
+			sanitizer = sanitizer,
+			listeners = listenersProvider.orderedStream().toList()
 		)
 	}
 
@@ -355,13 +358,15 @@ class FykeAutoConfiguration {
 		connectionFactory: ConnectionFactory,
 		inboxStore: InboxStore,
 		inboxPollerEngine: InboxPollerEngine,
-		consumerPartitionResolver: ConsumerPartitionResolver
+		consumerPartitionResolver: ConsumerPartitionResolver,
+		telemetry: FykeTelemetry
 	): RabbitConsumerRegistrar {
 		return RabbitConsumerRegistrar(
 			connectionFactory = connectionFactory,
 			inboxStore = inboxStore,
 			inboxPollerEngine = inboxPollerEngine,
-			defaultPartitionResolver = consumerPartitionResolver
+			defaultPartitionResolver = consumerPartitionResolver,
+			telemetry = telemetry
 		)
 	}
 
@@ -374,14 +379,16 @@ class FykeAutoConfiguration {
 		consumerFactory: ConsumerFactory<*, *>,
 		inboxStore: InboxStore,
 		inboxPollerEngine: InboxPollerEngine,
-		consumerPartitionResolver: ConsumerPartitionResolver
+		consumerPartitionResolver: ConsumerPartitionResolver,
+		telemetry: FykeTelemetry
 	): KafkaConsumerRegistrar {
 		@Suppress("UNCHECKED_CAST")
 		return KafkaConsumerRegistrar(
 			consumerFactory = consumerFactory as ConsumerFactory<Any, Any>,
 			inboxStore = inboxStore,
 			inboxPollerEngine = inboxPollerEngine,
-			defaultPartitionResolver = consumerPartitionResolver
+			defaultPartitionResolver = consumerPartitionResolver,
+			telemetry = telemetry
 		)
 	}
 

@@ -7,11 +7,13 @@ import dev.fyke.controlplane.v1.CommandExecutionResult
 import dev.fyke.controlplane.v1.CommandOutcome
 import dev.fyke.controlplane.v1.ControlPlaneEnvelope
 import dev.fyke.controlplane.v1.EventMetadataRecord
+import dev.fyke.controlplane.v1.EventStatus
 import dev.fyke.controlplane.v1.FykeControlPlaneServiceGrpc
 import dev.fyke.controlplane.v1.HandshakeResponse
 import dev.fyke.controlplane.v1.HeartbeatAck
 import dev.fyke.controlplane.v1.ReplayOutboxCommand
 import dev.fyke.core.inbox.InboxStore
+import dev.fyke.core.model.OutboxRecord
 import dev.fyke.core.outbox.OutboxPollerEngine
 import dev.fyke.core.outbox.OutboxStore
 import dev.fyke.core.outbox.OutboxWriter
@@ -20,6 +22,7 @@ import dev.fyke.exporter.controlplane.command.LocalCommandExecutor
 import dev.fyke.exporter.controlplane.config.ControlPlaneProperties
 import dev.fyke.exporter.controlplane.grpc.ControlPlaneGrpcClient
 import dev.fyke.exporter.controlplane.heartbeat.ControlPlaneHeartbeatReporter
+import dev.fyke.exporter.controlplane.telemetry.ControlPlaneEventListener
 import dev.fyke.exporter.controlplane.telemetry.TelemetryRingBuffer
 import dev.fyke.starter.Fyke
 import io.grpc.ManagedChannel
@@ -213,13 +216,18 @@ class ControlPlaneExporterIntegrationTest {
 		assertThat(firstEnvelope.handshake.identity.tenantId).isEqualTo("tenant-xyz")
 		assertThat(firstEnvelope.handshake.identity.appName).isEqualTo("order-service")
 
-		// 2. Enqueue telemetry and verify streaming to control plane
-		ringBuffer.enqueue(
-			EventMetadataRecord.newBuilder()
-				.setEventId("event-101")
-				.setBusinessKey("ORD-101")
-				.build()
+		// 2. Dispatch domain events through ControlPlaneEventListener and verify streaming to control plane
+		val eventListener = ControlPlaneEventListener(ringBuffer)
+		val outboxRecord = OutboxRecord(
+			id = UUID.fromString("00000000-0000-0000-0000-000000000101"),
+			type = "OrderCreated",
+			destination = "orders.exchange",
+			businessKey = "ORD-101",
+			idempotencyKey = "key-101",
+			payload = "{}".toByteArray(),
+			payloadHash = "hash101"
 		)
+		eventListener.onOutboxCreated(outboxRecord)
 
 		var telemetryEnvelope: AgentEnvelope? = null
 		val start = System.currentTimeMillis()
@@ -233,7 +241,7 @@ class ControlPlaneExporterIntegrationTest {
 
 		assertThat(telemetryEnvelope).isNotNull
 		assertThat(telemetryEnvelope!!.telemetryBatch.recordsList)
-			.anyMatch { it.eventId == "event-101" && it.businessKey == "ORD-101" }
+			.anyMatch { it.eventId == outboxRecord.id.toString() && it.businessKey == "ORD-101" && it.status == EventStatus.EVENT_STATUS_NEW }
 
 		// 3. Verify Heartbeat
 		client.sendHeartbeat()

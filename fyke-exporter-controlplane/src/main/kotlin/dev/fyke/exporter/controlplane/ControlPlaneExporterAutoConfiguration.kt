@@ -8,6 +8,7 @@ import dev.fyke.exporter.controlplane.command.LocalCommandExecutor
 import dev.fyke.exporter.controlplane.config.ControlPlaneProperties
 import dev.fyke.exporter.controlplane.grpc.ControlPlaneGrpcClient
 import dev.fyke.exporter.controlplane.heartbeat.ControlPlaneHeartbeatReporter
+import dev.fyke.exporter.controlplane.telemetry.ControlPlaneEventListener
 import dev.fyke.exporter.controlplane.telemetry.TelemetryRingBuffer
 import dev.fyke.starter.FykeAutoConfiguration
 import org.slf4j.LoggerFactory
@@ -36,6 +37,12 @@ class ControlPlaneExporterAutoConfiguration {
 			capacity = properties.buffer.capacity,
 			sanitizer = resolvedSanitizer,
 		)
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	fun controlPlaneEventListener(ringBuffer: TelemetryRingBuffer): ControlPlaneEventListener {
+		return ControlPlaneEventListener(ringBuffer)
 	}
 
 	@Bean

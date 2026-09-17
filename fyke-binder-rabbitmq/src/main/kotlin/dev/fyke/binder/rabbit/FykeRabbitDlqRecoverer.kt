@@ -73,6 +73,7 @@ class FykeRabbitDlqRecoverer(
 		try {
 			outboxStore.saveDlq(dlqRecord)
 			telemetry.recordDlqMessage()
+			telemetry.notifyDlqCaptured(dlqRecord)
 			log.error("Fyke: Consumer poison pill captured in fyke_dlq (id={}, businessKey={}, queue={}): {}",
 				dlqRecord.id, businessKey, properties.consumerQueue, cause.message)
 		} catch (e: Exception) {

@@ -3,6 +3,7 @@ package dev.fyke.core.inbox
 import dev.fyke.core.model.DlqRecord
 import dev.fyke.core.model.DlqSource
 import dev.fyke.core.model.InboxRecord
+import dev.fyke.core.model.InboxStatus
 import dev.fyke.core.partition.PartitionLocker
 import dev.fyke.core.poller.AbstractPollerEngine
 import dev.fyke.core.poller.BackoffPolicy
@@ -84,7 +85,11 @@ class InboxPollerEngine(
 	}
 
 	override fun claimBatch(partition: String): List<InboxRecord> {
-		return inboxStore.claimBatch(batchSize, leaseDuration, partition)
+		val batch = inboxStore.claimBatch(batchSize, leaseDuration, partition)
+		for (record in batch) {
+			telemetry.notifyInboxStatusChanged(record, InboxStatus.NEW, InboxStatus.PROCESSING)
+		}
+		return batch
 	}
 
 	override fun processRecord(record: InboxRecord) {
@@ -114,6 +119,7 @@ class InboxPollerEngine(
 				deserialized = deserializePayload(record.payload, registration.targetType)
 			} catch (e: Throwable) {
 				// Fatal poison pill: cannot deserialize payload
+				val errorReason = "Fatal deserialization error: ${e.message}"
 				log.error(
 					"Fyke: Fatal deserialization error for record {} on destination '{}'; moving to DLQ: {}",
 					record.id, record.destination, e.message
@@ -121,6 +127,7 @@ class InboxPollerEngine(
 				inboxStore.markDead(record.id)
 				saveToDlq(record, e)
 				telemetry.recordDlqMessage()
+				telemetry.notifyInboxStatusChanged(record.copy(status = InboxStatus.DEAD), InboxStatus.PROCESSING, InboxStatus.DEAD, errorReason)
 				return
 			}
 
@@ -139,6 +146,7 @@ class InboxPollerEngine(
 				}
 				val durationMs = System.currentTimeMillis() - startTime
 				inboxStore.markCompleted(record.id, Instant.now())
+				telemetry.notifyInboxStatusChanged(record.copy(status = InboxStatus.COMPLETED), InboxStatus.PROCESSING, InboxStatus.COMPLETED)
 				log.debug("Fyke: Successfully processed inbox record {} in {} ms", record.id, durationMs)
 			} catch (e: Throwable) {
 				val actualCause = if (e is InvocationTargetException && e.targetException != null) e.targetException else e
@@ -170,6 +178,7 @@ class InboxPollerEngine(
 			inboxStore.markDead(record.id)
 			saveToDlq(record, cause)
 			telemetry.recordDlqMessage()
+			telemetry.notifyInboxStatusChanged(record.copy(status = InboxStatus.DEAD, attempts = nextAttempt), InboxStatus.PROCESSING, InboxStatus.DEAD, reason)
 		} else {
 			val backoffMs = backoffPolicy.calculate(nextAttempt)
 			val nextAttemptAt = Instant.now().plusMillis(backoffMs)
@@ -178,6 +187,7 @@ class InboxPollerEngine(
 				record.id, nextAttempt, maxAttempts, nextAttemptAt, cause.message
 			)
 			inboxStore.markRetry(record.id, nextAttempt, nextAttemptAt)
+			telemetry.notifyInboxStatusChanged(record.copy(status = InboxStatus.NEW, attempts = nextAttempt, nextAttemptAt = nextAttemptAt), InboxStatus.PROCESSING, InboxStatus.NEW, cause.message)
 		}
 	}
 
@@ -211,6 +221,7 @@ class InboxPollerEngine(
 		)
 		try {
 			outboxStore.saveDlq(dlqRecord)
+			telemetry.notifyDlqCaptured(dlqRecord)
 		} catch (e: Exception) {
 			log.error("Fyke: Failed to save consumer DLQ entry for record {}: {}", record.id, e.message, e)
 		}

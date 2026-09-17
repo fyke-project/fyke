@@ -10,14 +10,22 @@ import io.opentelemetry.api.trace.Tracer
 import org.slf4j.LoggerFactory
 import java.util.concurrent.atomic.AtomicLong
 
+import dev.fyke.core.model.DlqRecord
+import dev.fyke.core.model.InboxRecord
+import dev.fyke.core.model.InboxStatus
+import dev.fyke.core.model.OutboxRecord
+import dev.fyke.core.model.OutboxStatus
+
 /**
  * Telemetry provider for Fyke outbox operations (R7).
  *
  * Emits OpenTelemetry spans and metrics, safe for no-op execution when no OpenTelemetry SDK is configured.
+ * Dispatches domain event lifecycle transitions to registered [FykeEventListener] instances.
  */
 class FykeTelemetry(
 	openTelemetry: OpenTelemetry? = null,
-	val sanitizer: ClientSideSanitizer = ClientSideSanitizer()
+	val sanitizer: ClientSideSanitizer = ClientSideSanitizer(),
+	private val listeners: List<FykeEventListener> = emptyList()
 ) {
 	private val log = LoggerFactory.getLogger(javaClass)
 
@@ -104,6 +112,71 @@ class FykeTelemetry(
 		} finally {
 			scope.close()
 			span.end()
+		}
+	}
+
+	fun notifyOutboxCreated(record: OutboxRecord) {
+		if (listeners.isEmpty()) return
+		for (listener in listeners) {
+			try {
+				listener.onOutboxCreated(record)
+			} catch (t: Throwable) {
+				log.warn("Fyke: FykeEventListener failed onOutboxCreated for id={}: {}", record.id, t.message)
+			}
+		}
+	}
+
+	fun notifyOutboxStatusChanged(
+		record: OutboxRecord,
+		oldStatus: OutboxStatus,
+		newStatus: OutboxStatus,
+		errorReason: String? = null
+	) {
+		if (listeners.isEmpty()) return
+		for (listener in listeners) {
+			try {
+				listener.onOutboxStatusChanged(record, oldStatus, newStatus, errorReason)
+			} catch (t: Throwable) {
+				log.warn("Fyke: FykeEventListener failed onOutboxStatusChanged for id={}: {}", record.id, t.message)
+			}
+		}
+	}
+
+	fun notifyInboxReceived(record: InboxRecord) {
+		if (listeners.isEmpty()) return
+		for (listener in listeners) {
+			try {
+				listener.onInboxReceived(record)
+			} catch (t: Throwable) {
+				log.warn("Fyke: FykeEventListener failed onInboxReceived for id={}: {}", record.id, t.message)
+			}
+		}
+	}
+
+	fun notifyInboxStatusChanged(
+		record: InboxRecord,
+		oldStatus: InboxStatus,
+		newStatus: InboxStatus,
+		errorReason: String? = null
+	) {
+		if (listeners.isEmpty()) return
+		for (listener in listeners) {
+			try {
+				listener.onInboxStatusChanged(record, oldStatus, newStatus, errorReason)
+			} catch (t: Throwable) {
+				log.warn("Fyke: FykeEventListener failed onInboxStatusChanged for id={}: {}", record.id, t.message)
+			}
+		}
+	}
+
+	fun notifyDlqCaptured(record: DlqRecord) {
+		if (listeners.isEmpty()) return
+		for (listener in listeners) {
+			try {
+				listener.onDlqCaptured(record)
+			} catch (t: Throwable) {
+				log.warn("Fyke: FykeEventListener failed onDlqCaptured for id={}: {}", record.id, t.message)
+			}
 		}
 	}
 }

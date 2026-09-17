@@ -8,6 +8,7 @@ import dev.fyke.core.inbox.InboxStore
 import dev.fyke.core.model.InboxRecord
 import dev.fyke.core.model.InboxStatus
 import dev.fyke.core.model.OrderingMode
+import dev.fyke.core.telemetry.FykeTelemetry
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.SmartInitializingSingleton
 import org.springframework.context.ApplicationContext
@@ -30,7 +31,8 @@ class KafkaConsumerRegistrar(
 	private val consumerFactory: ConsumerFactory<Any, Any>,
 	private val inboxStore: InboxStore,
 	private val inboxPollerEngine: InboxPollerEngine,
-	private val defaultPartitionResolver: ConsumerPartitionResolver = DefaultConsumerPartitionResolver()
+	private val defaultPartitionResolver: ConsumerPartitionResolver = DefaultConsumerPartitionResolver(),
+	private val telemetry: FykeTelemetry? = null
 ) : ApplicationContextAware, SmartInitializingSingleton, SmartLifecycle {
 
 	private val log = LoggerFactory.getLogger(javaClass)
@@ -158,6 +160,7 @@ class KafkaConsumerRegistrar(
 							saved
 						)
 						if (saved) {
+							telemetry?.notifyInboxReceived(inboxRecord)
 							inboxPollerEngine.triggerPoll()
 						}
 					} catch (e: Exception) {

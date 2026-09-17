@@ -89,6 +89,7 @@ class JdbcOutboxWriter(
 			val conn = DataSourceUtils.getConnection(dataSource)
 			try {
 				outboxStore.save(record)
+				telemetry.notifyOutboxCreated(record)
 
 				// Transactional NOTIFY hint on PostgreSQL
 				val isPostgres = conn.metaData.databaseProductName.equals("PostgreSQL", ignoreCase = true)

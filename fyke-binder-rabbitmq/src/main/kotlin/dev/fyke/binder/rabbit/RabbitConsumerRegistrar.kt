@@ -8,6 +8,7 @@ import dev.fyke.core.inbox.InboxStore
 import dev.fyke.core.model.InboxRecord
 import dev.fyke.core.model.InboxStatus
 import org.slf4j.LoggerFactory
+import dev.fyke.core.telemetry.FykeTelemetry
 import org.springframework.amqp.core.AcknowledgeMode
 import org.springframework.amqp.rabbit.connection.ConnectionFactory
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer
@@ -28,7 +29,8 @@ class RabbitConsumerRegistrar(
 	private val connectionFactory: ConnectionFactory,
 	private val inboxStore: InboxStore,
 	private val inboxPollerEngine: InboxPollerEngine,
-	private val defaultPartitionResolver: ConsumerPartitionResolver = DefaultConsumerPartitionResolver()
+	private val defaultPartitionResolver: ConsumerPartitionResolver = DefaultConsumerPartitionResolver(),
+	private val telemetry: FykeTelemetry? = null
 ) : ApplicationContextAware, SmartInitializingSingleton, SmartLifecycle {
 
 	private val log = LoggerFactory.getLogger(javaClass)
@@ -152,6 +154,7 @@ class RabbitConsumerRegistrar(
 						channel?.basicAck(properties.deliveryTag, false)
 						log.trace("Fyke: Acknowledged RabbitMQ deliveryTag={} (saved={})", properties.deliveryTag, saved)
 						if (saved) {
+							telemetry?.notifyInboxReceived(inboxRecord)
 							inboxPollerEngine.triggerPoll()
 						}
 					} catch (e: Exception) {
