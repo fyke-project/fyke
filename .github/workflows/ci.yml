@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      # Spotless format check (fast, no Docker needed)
+      - name: Check formatting
+        run: ./gradlew spotlessCheck --no-daemon --stacktrace
+
+      # Compile all modules
+      - name: Compile
+        run: ./gradlew assemble --no-daemon --stacktrace
+
+      # Unit + integration tests (Testcontainers spin up real Postgres + RabbitMQ + Kafka)
+      # Benchmarks module is excluded — it requires dedicated hardware for meaningful results
+      - name: Test
+        run: >
+          ./gradlew check
+          -x :fyke-benchmarks:test
+          --no-daemon
+          --stacktrace
+        env:
+          # Testcontainers Ryuk needs access to the Docker socket
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          retention-days: 7

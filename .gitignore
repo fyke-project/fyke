@@ -24,3 +24,7 @@ tmp/
 scratch/
 .dev/
 
+# Agent session state
+.agent/
+.gemini/
+
