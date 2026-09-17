@@ -5,6 +5,7 @@ include(
 	"fyke-binder-rabbitmq",
 	"fyke-binder-kafka",
 	"fyke-spring-boot-starter",
+	"fyke-exporter-controlplane",
 	"fyke-demo",
 	"fyke-benchmarks"
 )

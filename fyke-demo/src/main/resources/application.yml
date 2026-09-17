@@ -34,6 +34,10 @@ fyke:
 
   retention:
     enabled: true
+  control-plane:
+    enabled: true
+    app-name: "${spring.application.name}"
+    instance-id: "${HOSTNAME}-${random.uuid}"
 
 management:
   endpoints:

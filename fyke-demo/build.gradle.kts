@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
 	implementation(project(":fyke-spring-boot-starter"))
+	implementation(project(":fyke-exporter-controlplane"))
 	implementation("org.springframework.boot:spring-boot-starter-web")
 	implementation("org.springframework.boot:spring-boot-starter-amqp")
 	implementation("org.springframework.boot:spring-boot-starter-kafka")
