@@ -38,6 +38,9 @@ fyke:
     enabled: true
     app-name: "${spring.application.name}"
     instance-id: "${HOSTNAME}-${random.uuid}"
+    command-verification:
+      enabled: true
+      public-key: ${FYKE_COMMAND_VERIFICATION_PUBLIC_KEY:MCowBQYDK2VwAyEAHBLp8sXY2+zPfvUrYzkiTRHHyMjwrFXNISnYZnygKQw=}
 
 management:
   endpoints:
