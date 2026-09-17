@@ -3,6 +3,15 @@ plugins {
 	kotlin("plugin.spring")
 }
 
+// fyke-benchmarks is a test harness, not a runnable application.
+// Disable bootJar to prevent the Spring Boot plugin from failing on missing main class.
+tasks.named("bootJar") {
+	enabled = false
+}
+tasks.named("jar") {
+	enabled = true
+}
+
 dependencies {
 	implementation(project(":fyke-spring-boot-starter"))
 	implementation("org.springframework.boot:spring-boot-starter")

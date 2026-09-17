@@ -66,8 +66,8 @@ class RabbitConfig {
 	}
 
 	@Bean
-	fun jsonMessageConverter(objectMapper: com.fasterxml.jackson.databind.ObjectMapper): org.springframework.amqp.support.converter.MessageConverter {
-		return org.springframework.amqp.support.converter.Jackson2JsonMessageConverter(objectMapper)
+	fun jsonMessageConverter(): org.springframework.amqp.support.converter.MessageConverter {
+		return org.springframework.amqp.support.converter.JacksonJsonMessageConverter()
 	}
 }
 
