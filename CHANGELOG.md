@@ -66,3 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     10. Producer outbox prevents leapfrogging when earlier partition record is in retry backoff.
     11. Apache Kafka binder end-to-end delivery and poison-pill DLQ recovery (`FykeKafkaScenariosTest`).
     12. Actuator health indicators, `/actuator/fyke` endpoint, and Micrometer metrics (`FykeActuatorIntegrationTest`).
+- **High-Concurrency Stress & Latency Benchmark Harness (`fyke-benchmarks`)**:
+  - Dedicated benchmark module with isolated Gradle execution task `./gradlew :fyke-benchmarks:benchmark` (`@Tag("benchmark")`, excluded from regular fast test runs).
+  - High-precision latency recording via `HdrHistogram` measuring $p50, p90, p95, p99, p99.9, \max$, mean, and throughput with ASCII table rendering.
+  - Multi-threaded load generator simulating 50 concurrent committer threads across partitions using `TransactionTemplate` and after-commit timestamp synchronizations.
+  - Monotonic FIFO sequence verifier validating strict database sequence order (`x-fyke-seq`) per partition.
+  - In-memory `RecordingBrokerBinder` to benchmark and profile core DB poller mechanics in isolation.
+  - Acceptance criterion R2 validation: 30.5ms dispatch latency under a 10,000-row pre-seeded backlog (target $\le 100\text{ms}$).
+  - High-concurrency benchmarks validating zero lock contention or deadlocks on PostgreSQL advisory locks and row-level `FOR UPDATE SKIP LOCKED`.
+  - Real broker benchmarks for RabbitMQ (publisher confirms) and Apache Kafka (KRaft producer ACKs) verifying throughput and wire-order monotonicity.

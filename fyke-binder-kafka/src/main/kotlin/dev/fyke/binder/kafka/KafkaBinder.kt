@@ -35,6 +35,7 @@ class KafkaBinder(
 			add(RecordHeader("x-fyke-business-key", record.businessKey.toByteArray(StandardCharsets.UTF_8)))
 			add(RecordHeader("x-fyke-type", record.type.toByteArray(StandardCharsets.UTF_8)))
 			add(RecordHeader("x-fyke-partition-key", record.partitionKey.toByteArray(StandardCharsets.UTF_8)))
+			add(RecordHeader("x-fyke-seq", record.seq.toString().toByteArray(StandardCharsets.UTF_8)))
 			add(RecordHeader("x-fyke-content-type", record.contentType.toByteArray(StandardCharsets.UTF_8)))
 
 			record.correlationId?.let {

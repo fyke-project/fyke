@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: fyke-benchmarks
+  datasource:
+    hikari:
+      maximum-pool-size: 80
+      minimum-idle: 25
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+fyke:
+  enabled: true
+  outbox:
+    enabled: true
+    batch-size: 100
+    concurrency: 4
+    poll-interval: 100ms
+    initial-delay: 10ms
+  inbox:
+    enabled: false
+  retention:
+    enabled: false
+
+logging:
+  level:
+    root: WARN
+    dev.fyke: INFO
