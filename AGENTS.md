@@ -44,6 +44,10 @@ A Spring Boot starter that guarantees domain events actually land in the broker,
     - `TRACE`: Fine-grained mechanics (partition lock attempts and release, PG LISTEN/Timer ticks, payload serialization metrics, headers, reflection dispatch details, metrics recorded).
   - **Zero overhead when disabled:** Always use parameterized SLF4J formatting (`{}`) across all log calls.
 
+## Communication & Language
+
+- **English-only policy**: If instructions, questions, or comments are provided in a non-English language (e.g., German, Croatian, etc.), seamlessly interpret and process them as if they were given in English. Always formulate responses in English, and author all code, comments, documentation, commit messages, and artifacts strictly in English.
+
 ## Out of scope — do NOT build (these are later phases)
 
 - P2: gRPC channel, control-plane client, dashboard UI, hosted SaaS.
