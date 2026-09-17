@@ -2,7 +2,8 @@
 
 **The transactional outbox for Spring Boot that never lets an event escape.**
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/fyke-project/fyke/actions/workflows/ci.yml/badge.svg)](https://github.com/fyke-project/fyke/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/fyke-project/fyke)](LICENSE)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1+-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![JVM](https://img.shields.io/badge/JVM-21+-orange.svg)](https://openjdk.org/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3+-purple.svg)](https://kotlinlang.org/)

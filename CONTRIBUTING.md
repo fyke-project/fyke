@@ -17,7 +17,7 @@ installation needed.
 ## Getting started
 
 ```bash
-git clone https://github.com/<org>/fyke.git
+git clone https://github.com/fyke-project/fyke.git
 cd fyke
 ./gradlew assemble   # compile all modules
 ./gradlew check      # compile + format-check + test (requires Docker)
